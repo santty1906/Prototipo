@@ -1,0 +1,125 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+
+import { DocumentLink } from "@/components/document-link";
+import { Card, Chip, EmptyState, PageHeader, StatusBadge } from "@/components/ui";
+import { formatBytes, formatDate } from "@/lib/format";
+import { getProfile } from "@/server/profiles";
+
+export const dynamic = "force-dynamic";
+
+export default async function ProfilePage({ params }: PageProps<"/profiles/[id]">) {
+  const { id } = await params;
+  const profile = await getProfile(id);
+
+  if (!profile) notFound();
+
+  const facts = [
+    { label: "Email", value: profile.email },
+    { label: "Phone", value: profile.phone },
+    { label: "Position", value: profile.position },
+    { label: "Department", value: profile.department },
+    { label: "Education", value: profile.education },
+    {
+      label: "Experience",
+      value: profile.experience_years === null ? null : `${profile.experience_years} years`,
+    },
+  ];
+
+  return (
+    <>
+      <Link href="/profiles" className="text-sm text-slate-600 hover:text-slate-900">
+        ← Back to profiles
+      </Link>
+
+      <div className="mt-4">
+        <PageHeader
+          title={profile.full_name}
+          description={`Added ${formatDate(profile.created_at)}`}
+        />
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+        <div className="space-y-6">
+          {profile.summary ? (
+            <Card>
+              <h2 className="mb-2 text-sm font-medium text-slate-600">Summary</h2>
+              <p className="text-sm leading-relaxed">{profile.summary}</p>
+            </Card>
+          ) : null}
+
+          <Card>
+            <h2 className="mb-3 text-sm font-medium text-slate-600">Capabilities</h2>
+            {profile.capabilities.length === 0 ? (
+              <p className="text-sm text-slate-500">None recorded.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {profile.capabilities.map((trait) => (
+                  <Chip key={trait.code}>{trait.label}</Chip>
+                ))}
+              </div>
+            )}
+
+            <h2 className="mt-5 mb-3 text-sm font-medium text-slate-600">Attitudes</h2>
+            {profile.attitudes.length === 0 ? (
+              <p className="text-sm text-slate-500">None recorded.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {profile.attitudes.map((trait) => (
+                  <Chip key={trait.code}>{trait.label}</Chip>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          <section>
+            <div className="mb-3 flex items-baseline justify-between">
+              <h2 className="text-lg font-semibold">Documents</h2>
+              <Link
+                href={`/upload?profileId=${profile.id}`}
+                className="text-sm text-slate-600 hover:text-slate-900"
+              >
+                Upload PDFs
+              </Link>
+            </div>
+
+            {profile.documents.length === 0 ? (
+              <EmptyState>No documents for this profile yet.</EmptyState>
+            ) : (
+              <Card className="divide-y divide-slate-100 p-0">
+                {profile.documents.map((document) => (
+                  <div key={document.id} className="px-5 py-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-medium">{document.file_name}</p>
+                      <StatusBadge status={document.processing_status} />
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm text-slate-500">
+                      <span>{formatBytes(document.file_size)}</span>
+                      <span>{formatDate(document.created_at)}</span>
+                      <DocumentLink documentId={document.id} />
+                    </div>
+                    {document.processing_error ? (
+                      <p className="mt-2 text-sm text-red-600">{document.processing_error}</p>
+                    ) : null}
+                  </div>
+                ))}
+              </Card>
+            )}
+          </section>
+        </div>
+
+        <Card className="h-fit">
+          <h2 className="mb-3 text-sm font-medium text-slate-600">Details</h2>
+          <dl className="space-y-3 text-sm">
+            {facts.map((fact) => (
+              <div key={fact.label}>
+                <dt className="text-slate-500">{fact.label}</dt>
+                <dd className="mt-0.5 break-words">{fact.value ?? "—"}</dd>
+              </div>
+            ))}
+          </dl>
+        </Card>
+      </div>
+    </>
+  );
+}

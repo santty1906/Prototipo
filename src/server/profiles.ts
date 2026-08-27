@@ -1,0 +1,242 @@
+import "server-only";
+
+import { getAdminSupabase } from "@/lib/supabase/admin";
+import type { DocumentRow, Profile, Trait } from "@/lib/supabase/database.types";
+
+export type TraitOption = { code: string; label: string };
+
+export type ProfileListItem = Profile & {
+  capabilities: TraitOption[];
+  attitudes: TraitOption[];
+};
+
+export type ProfileFilters = {
+  q?: string;
+  capabilities?: string[];
+  attitudes?: string[];
+};
+
+const PAGE_SIZE = 50;
+
+/**
+ * PostgREST reads `%`, `_`, `,` and parentheses as filter syntax, so a name
+ * typed into the search box has to be stripped of them before it becomes part
+ * of an `ilike` pattern.
+ */
+function sanitizeSearch(q: string) {
+  return q.replace(/[%_,().*"]/g, " ").trim();
+}
+
+/**
+ * Profile ids that carry *every* one of `codes` (AND, not OR — picking two
+ * capabilities should narrow the list, not widen it).
+ *
+ * Returns `null` when no codes were requested, meaning "no constraint".
+ */
+async function profileIdsWithAllTraits(
+  table: "profile_capabilities" | "profile_attitudes",
+  codes: string[],
+): Promise<string[] | null> {
+  if (codes.length === 0) return null;
+
+  const { data, error } = await getAdminSupabase()
+    .from(table)
+    .select("profile_id, code")
+    .in("code", codes);
+
+  if (error) throw new Error(`Could not filter by ${table}: ${error.message}`);
+
+  const matchedPerProfile = new Map<string, Set<string>>();
+  for (const row of data ?? []) {
+    const set = matchedPerProfile.get(row.profile_id) ?? new Set<string>();
+    set.add(row.code);
+    matchedPerProfile.set(row.profile_id, set);
+  }
+
+  return [...matchedPerProfile]
+    .filter(([, matched]) => matched.size === codes.length)
+    .map(([profileId]) => profileId);
+}
+
+function intersect(a: string[] | null, b: string[] | null) {
+  if (a === null) return b;
+  if (b === null) return a;
+  const inB = new Set(b);
+  return a.filter((id) => inB.has(id));
+}
+
+/** Traits for a set of profiles, grouped by profile id. */
+async function traitsByProfile(
+  table: "profile_capabilities" | "profile_attitudes",
+  profileIds: string[],
+) {
+  const grouped = new Map<string, TraitOption[]>();
+  if (profileIds.length === 0) return grouped;
+
+  const { data, error } = await getAdminSupabase()
+    .from(table)
+    .select("profile_id, code, label")
+    .in("profile_id", profileIds)
+    .order("label");
+
+  if (error) throw new Error(`Could not load ${table}: ${error.message}`);
+
+  for (const row of data ?? []) {
+    const list = grouped.get(row.profile_id) ?? [];
+    list.push({ code: row.code, label: row.label });
+    grouped.set(row.profile_id, list);
+  }
+
+  return grouped;
+}
+
+export async function listProfiles(filters: ProfileFilters = {}): Promise<ProfileListItem[]> {
+  const capabilityCodes = filters.capabilities ?? [];
+  const attitudeCodes = filters.attitudes ?? [];
+
+  const allowedIds = intersect(
+    await profileIdsWithAllTraits("profile_capabilities", capabilityCodes),
+    await profileIdsWithAllTraits("profile_attitudes", attitudeCodes),
+  );
+
+  // A filter was applied and nothing matched — skip the second round trip.
+  if (allowedIds !== null && allowedIds.length === 0) return [];
+
+  let query = getAdminSupabase()
+    .from("profiles")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(PAGE_SIZE);
+
+  const search = sanitizeSearch(filters.q ?? "");
+  if (search) query = query.ilike("full_name", `%${search}%`);
+  if (allowedIds !== null) query = query.in("id", allowedIds);
+
+  const { data, error } = await query;
+  if (error) throw new Error(`Could not load profiles: ${error.message}`);
+
+  const profiles = data ?? [];
+  const ids = profiles.map((p) => p.id);
+  const [capabilities, attitudes] = await Promise.all([
+    traitsByProfile("profile_capabilities", ids),
+    traitsByProfile("profile_attitudes", ids),
+  ]);
+
+  return profiles.map((profile) => ({
+    ...profile,
+    capabilities: capabilities.get(profile.id) ?? [],
+    attitudes: attitudes.get(profile.id) ?? [],
+  }));
+}
+
+export type ProfileDetail = Profile & {
+  capabilities: TraitOption[];
+  attitudes: TraitOption[];
+  documents: DocumentRow[];
+};
+
+export async function getProfile(id: string): Promise<ProfileDetail | null> {
+  const supabase = getAdminSupabase();
+
+  const { data: profile, error } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) throw new Error(`Could not load profile: ${error.message}`);
+  if (!profile) return null;
+
+  const [capabilities, attitudes, documents] = await Promise.all([
+    supabase.from("profile_capabilities").select("*").eq("profile_id", id).order("label"),
+    supabase.from("profile_attitudes").select("*").eq("profile_id", id).order("label"),
+    supabase
+      .from("documents")
+      .select("*")
+      .eq("profile_id", id)
+      .order("created_at", { ascending: false }),
+  ]);
+
+  const toOptions = (rows: Trait[] | null) =>
+    (rows ?? []).map(({ code, label }) => ({ code, label }));
+
+  return {
+    ...profile,
+    capabilities: toOptions(capabilities.data),
+    attitudes: toOptions(attitudes.data),
+    documents: documents.data ?? [],
+  };
+}
+
+/**
+ * Every distinct capability / attitude in use, for the filter checkboxes.
+ *
+ * Deduped in JS: PostgREST has no DISTINCT, and at MVP volume one small scan is
+ * cheaper than the view or RPC it would take to avoid it.
+ */
+export async function listTraitOptions() {
+  const supabase = getAdminSupabase();
+
+  const [capabilities, attitudes] = await Promise.all([
+    supabase.from("profile_capabilities").select("code, label").order("label"),
+    supabase.from("profile_attitudes").select("code, label").order("label"),
+  ]);
+
+  const dedupe = (rows: { code: string; label: string }[] | null): TraitOption[] => {
+    const byCode = new Map<string, string>();
+    for (const row of rows ?? []) byCode.set(row.code, row.label);
+    return [...byCode]
+      .map(([code, label]) => ({ code, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  };
+
+  return {
+    capabilities: dedupe(capabilities.data),
+    attitudes: dedupe(attitudes.data),
+  };
+}
+
+export type NewProfileInput = {
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  position: string | null;
+  department: string | null;
+  education: string | null;
+  experience_years: number | null;
+  summary: string | null;
+  capabilities: TraitOption[];
+  attitudes: TraitOption[];
+};
+
+export async function createProfile(input: NewProfileInput) {
+  const supabase = getAdminSupabase();
+  const { capabilities, attitudes, ...profile } = input;
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .insert(profile)
+    .select("id")
+    .single();
+
+  if (error) throw new Error(`Could not create the profile: ${error.message}`);
+
+  const traitRows = (traits: TraitOption[]) =>
+    traits.map((trait) => ({ profile_id: data.id, ...trait }));
+
+  if (capabilities.length > 0) {
+    const { error: capError } = await supabase
+      .from("profile_capabilities")
+      .insert(traitRows(capabilities));
+    if (capError) throw new Error(`Could not save capabilities: ${capError.message}`);
+  }
+
+  if (attitudes.length > 0) {
+    const { error: attError } = await supabase
+      .from("profile_attitudes")
+      .insert(traitRows(attitudes));
+    if (attError) throw new Error(`Could not save attitudes: ${attError.message}`);
+  }
+
+  return data.id;
+}
