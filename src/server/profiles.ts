@@ -19,12 +19,21 @@ export type ProfileFilters = {
 const PAGE_SIZE = 50;
 
 /**
- * PostgREST reads `%`, `_`, `,` and parentheses as filter syntax, so a name
- * typed into the search box has to be stripped of them before it becomes part
- * of an `ilike` pattern.
+ * Prepares a typed name for matching against `profiles.full_name_normalized`.
+ *
+ * Two things happen here. PostgREST reads `%`, `_`, `,` and parentheses as
+ * filter syntax, so those are stripped. And the term is lower-cased and
+ * accent-stripped to mirror the generated column, which is what lets "Ramirez"
+ * find "Ramírez" while "Ramírez" still finds itself — Postgres `ILIKE` folds
+ * case but not accents, so the folding has to happen on both sides.
  */
 function sanitizeSearch(q: string) {
-  return q.replace(/[%_,().*"]/g, " ").trim();
+  return q
+    .replace(/[%_,().*"]/g, " ")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .trim();
 }
 
 /**
@@ -109,7 +118,9 @@ export async function listProfiles(filters: ProfileFilters = {}): Promise<Profil
     .limit(PAGE_SIZE);
 
   const search = sanitizeSearch(filters.q ?? "");
-  if (search) query = query.ilike("full_name", `%${search}%`);
+  // Matched against the generated, accent-free column, which carries its own
+  // trigram index — a plain `like` suffices since both sides are lower-cased.
+  if (search) query = query.like("full_name_normalized", `%${search}%`);
   if (allowedIds !== null) query = query.in("id", allowedIds);
 
   const { data, error } = await query;

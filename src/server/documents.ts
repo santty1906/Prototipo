@@ -3,6 +3,13 @@ import "server-only";
 import { UPLOAD } from "@/lib/env";
 import { getAdminSupabase } from "@/lib/supabase/admin";
 import type { DocumentRow, ProcessingStatus } from "@/lib/supabase/database.types";
+import {
+  GRAPH_SCALES,
+  parseCompetencesReport,
+  type CompetencesReport,
+} from "@/server/pdf/competences-report";
+import { extractPdfText } from "@/server/pdf/extract-text";
+import { extractTraits, type Trait } from "@/server/pdf/traits";
 
 /** A document row plus the name of the profile it belongs to, if any. */
 export type DocumentWithProfile = DocumentRow & {
@@ -189,4 +196,168 @@ export async function createDocumentViewUrl(documentId: string) {
   }
 
   return signed.signedUrl;
+}
+
+/**
+ * Which graph supplies the four factor columns on `profile_assessments`.
+ *
+ * The report measures all four factors on all three graphs (12 numbers), but the
+ * assessment row has four factor columns. Graph 1 — ADAPTACION LABORAL — is used
+ * because it describes behaviour at work, which is what a talent profile is for.
+ * The complete matrix is stored in `raw_scores` regardless, so changing this
+ * constant and re-processing is enough to revise the choice.
+ */
+const FACTOR_SOURCE_GRAPH = 1 as const;
+
+export type ProcessedDocument = {
+  documentId: string;
+  fileName: string;
+  totalPages: number;
+  characters: number;
+  profileId: string;
+  profileCreated: boolean;
+  capabilities: Trait[];
+  attitudes: Trait[];
+  report: CompetencesReport;
+};
+
+/** Maps a parsed report onto the columns of `profile_assessments`. */
+function toAssessmentScores(report: CompetencesReport) {
+  const factorScores = report.scores[GRAPH_SCALES[FACTOR_SOURCE_GRAPH]];
+  const [dominance, influence, steadiness, control] = factorScores?.values ?? [];
+
+  return {
+    dominance: dominance ?? null,
+    influence: influence ?? null,
+    steadiness: steadiness ?? null,
+    control: control ?? null,
+    adaptacion_laboral: report.graphSummary[1],
+    conducta_bajo_presion: report.graphSummary[2],
+    imagen_propia: report.graphSummary[3],
+    // The full 3x4 matrix, so nothing the report measured is lost.
+    raw: {
+      factorSourceGraph: FACTOR_SOURCE_GRAPH,
+      factors: report.factors,
+      graphs: {
+        1: report.scores.adaptacion_laboral?.values ?? null,
+        2: report.scores.conducta_bajo_presion?.values ?? null,
+        3: report.scores.imagen_propia?.values ?? null,
+      },
+    },
+  };
+}
+
+/** "26/08/2026" -> "2026-08-26". Returns null for anything else. */
+function toIsoDate(value: string | null): string | null {
+  if (!value) return null;
+  const match = value.trim().match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/);
+  if (!match) return null;
+  const [, day, month, year] = match;
+  const iso = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  return Number.isNaN(Date.parse(iso)) ? null : iso;
+}
+
+/**
+ * The full processing pipeline for one uploaded PDF.
+ *
+ * Download -> text -> parse -> derive traits, all in TypeScript; then a single
+ * `apply_document_analysis` RPC performs every database write. A Postgres
+ * function body is one transaction, so the profile, the assessment, both trait
+ * tables and the document's own row either all land or none do — there is no
+ * half-processed state to clean up afterwards.
+ *
+ * Idempotent. Re-processing the same document updates its assessment (unique on
+ * document_id), replaces only the traits that document previously produced, and
+ * re-matches the same profile by normalised name instead of creating a second.
+ *
+ * The PDF bytes stay in memory: nothing is written to disk, which is what makes
+ * this safe on a read-only serverless filesystem.
+ */
+export async function processDocument(documentId: string): Promise<ProcessedDocument> {
+  const supabase = getAdminSupabase();
+
+  const { data: document, error } = await supabase
+    .from("documents")
+    .select("id, file_name, storage_path")
+    .eq("id", documentId)
+    .maybeSingle();
+
+  if (error) throw new UploadError(`Could not load the document: ${error.message}`, 500);
+  if (!document) throw new UploadError("Document not found.", 404);
+
+  await supabase
+    .from("documents")
+    .update({ processing_status: "PROCESSING", processing_error: null })
+    .eq("id", documentId);
+
+  try {
+    const { data: file, error: downloadError } = await supabase.storage
+      .from(UPLOAD.bucket)
+      .download(document.storage_path);
+
+    if (downloadError || !file) {
+      throw new Error(
+        `Could not download the PDF from storage: ${downloadError?.message ?? "unknown error"}`,
+      );
+    }
+
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const extracted = await extractPdfText(bytes);
+    const report = parseCompetencesReport(extracted.text);
+
+    // The name is the only identity this format carries, so without it there is
+    // nothing to attach the analysis to.
+    if (!report.full_name) {
+      throw new Error(
+        'No "Nombre:" line was found, so the report cannot be matched to a person.',
+      );
+    }
+
+    const { capabilities, attitudes } = extractTraits(report.sections);
+
+    const { data: applied, error: rpcError } = await supabase.rpc("apply_document_analysis", {
+      p_document_id: documentId,
+      p_full_name: report.full_name,
+      p_report_date: toIsoDate(report.report_date),
+      p_scores: toAssessmentScores(report),
+      p_sections: {
+        conductas_observables_1: report.sections.conductas_observables_graph_1,
+        conductas_observables_2: report.sections.conductas_observables_graph_2,
+        conductas_observables_3: report.sections.conductas_observables_graph_3,
+        motivadores: report.sections.motivadores,
+        entorno_laboral_ideal: report.sections.entorno_laboral_ideal,
+        otros_comentarios: report.sections.otros_comentarios,
+      },
+      p_capabilities: capabilities,
+      p_attitudes: attitudes,
+    });
+
+    if (rpcError) throw new Error(`Could not save the analysis: ${rpcError.message}`);
+    if (!applied) throw new Error("The analysis returned no profile.");
+
+    // apply_document_analysis marks the document COMPLETED inside the same
+    // transaction as the writes above, so there is nothing to update here.
+    return {
+      documentId: document.id,
+      fileName: document.file_name,
+      totalPages: extracted.totalPages,
+      characters: extracted.text.length,
+      profileId: applied.profile_id,
+      profileCreated: applied.profile_created,
+      capabilities,
+      attitudes,
+      report,
+    };
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : "Processing failed.";
+
+    // Record why before rethrowing, so a failed document is diagnosable in the UI
+    // rather than left stuck in PROCESSING. Never marked COMPLETED.
+    await supabase
+      .from("documents")
+      .update({ processing_status: "FAILED", processing_error: message.slice(0, 500) })
+      .eq("id", documentId);
+
+    throw new UploadError(message, 422);
+  }
 }

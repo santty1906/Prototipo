@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 
 import type { TraitOption } from "@/server/profiles";
 
@@ -27,29 +27,56 @@ export function ProfileFilters({
   const [isPending, startTransition] = useTransition();
   const [query, setQuery] = useState(selected.q);
 
-  function push(next: Selected) {
-    const params = new URLSearchParams();
-    if (next.q.trim()) params.set("q", next.q.trim());
-    for (const code of next.capabilities) params.append("capability", code);
-    for (const code of next.attitudes) params.append("attitude", code);
-    const search = params.toString();
-    startTransition(() => router.push(search ? `/profiles?${search}` : "/profiles"));
-  }
+  /**
+   * The pending debounce timer.
+   *
+   * It has to be cancellable from outside the effect: a checkbox click must kill
+   * an in-flight keystroke timer. Without that, the timer fires afterwards with
+   * the `selected` it captured *before* the click and silently drops the newly
+   * chosen capability from the URL.
+   */
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Debounce typing so every keystroke does not hit the database.
+  const cancelDebounce = useCallback(() => {
+    if (debounce.current) {
+      clearTimeout(debounce.current);
+      debounce.current = null;
+    }
+  }, []);
+
+  const push = useCallback(
+    (next: Selected) => {
+      cancelDebounce();
+      const params = new URLSearchParams();
+      if (next.q.trim()) params.set("q", next.q.trim());
+      for (const code of next.capabilities) params.append("capability", code);
+      for (const code of next.attitudes) params.append("attitude", code);
+      const search = params.toString();
+      startTransition(() => router.push(search ? `/profiles?${search}` : "/profiles"));
+    },
+    [cancelDebounce, router],
+  );
+
+  // Debounce typing so every keystroke does not hit the database. `query` is the
+  // live input value and always wins over `selected.q`, which lags by one
+  // navigation — so a toggle mid-typing keeps the text instead of reverting it.
   useEffect(() => {
     if (query === selected.q) return;
-    const timer = setTimeout(() => push({ ...selected, q: query }), 250);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+    debounce.current = setTimeout(() => {
+      debounce.current = null;
+      push({ q: query, capabilities: selected.capabilities, attitudes: selected.attitudes });
+    }, 250);
+    return cancelDebounce;
+  }, [query, selected.q, selected.capabilities, selected.attitudes, push, cancelDebounce]);
 
   function toggle(kind: "capabilities" | "attitudes", code: string) {
     const current = selected[kind];
     const next = current.includes(code)
       ? current.filter((value) => value !== code)
       : [...current, code];
-    push({ ...selected, [kind]: next });
+    // Send the live `query`, not `selected.q`: text typed in the last 250 ms has
+    // not reached the URL yet and would otherwise be lost.
+    push({ ...selected, q: query, [kind]: next });
   }
 
   const hasFilters =
