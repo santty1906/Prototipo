@@ -3,42 +3,56 @@ import { describe, expect, it } from "vitest";
 import { GRAPH_SCALES, parseCompetencesReport } from "./competences-report";
 
 /**
- * A report as pdf.js actually renders it: the title, "Nombre:" and "Fecha:"
- * repeat on every page, each page ends with a copyright line and a page number,
- * one heading is wrapped across two lines, and the sections do not appear in
- * numerical order. All of that has to survive parsing.
+ * A fixture built from the REAL TIMS report's extracted text, not an idealised
+ * one. Everything awkward about the real document is reproduced here:
+ *
+ *  - "Nombre:" and "Fecha:" share a single line
+ *  - the header repeats on every page, with a copyright footer and page number
+ *  - scores appear as lone 1-3 digit lines (which look exactly like page numbers)
+ *  - the authoritative scores are a 4 x 3 matrix, one factor per row
+ *  - the summary heading has footer text concatenated onto it with no space
+ *  - "CONDUCTAS OBSERVABLES" sections do not appear in numerical order
+ *  - one heading is wrapped across two lines by the PDF layout
  */
-const SAMPLE = [
+const REAL_SAMPLE = [
   "PERSONAL COMPETENCES ANALYSIS",
-  "",
-  "Nombre: Nicolás Gallo Aranda",
-  "Fecha: 26/08/2026",
+  "Nombre: Nicolás Gallo Aranda Fecha: 26/08/2026",
   "",
   "ADAPTACIÓN LABORAL",
-  "78 50 56 53",
-  "",
-  "CONDUCTA BAJO PRESIÓN",
-  "75 26 50 62",
-  "",
-  "IMAGEN PROPIA",
-  "62 62 25 50",
-  "",
-  "FACTORES DE MEDICIÓN",
-  "DOMINANCIA",
-  "INFLUENCIA",
-  "SOLIDEZ",
-  "CONTROL",
-  "",
-  "RESUMEN POR GRÁFICO (%)",
-  "59",
-  "53",
+  "78",
   "50",
+  "18",
+  "53",
+  "Gráfica 1",
+  "CONDUCTA BAJO PRESIÓN",
+  "56",
+  "75",
+  "26",
+  "50",
+  "Gráfica 2",
+  "IMAGEN PROPIA",
+  "62 62",
+  "25",
+  "50",
+  "Gráfica 3",
   "© Copyright TIMS International 2026",
   "1",
   "\f",
   "PERSONAL COMPETENCES ANALYSIS",
-  "Nombre: Nicolás Gallo Aranda",
-  "Fecha: 26/08/2026",
+  "Nombre: Nicolás Gallo Aranda Fecha: 26/08/2026",
+  "RESUMEN POR GRÁFICO (%)Personal Competences Analysis",
+  "FACTORES DE",
+  "MEDICIÓN ADAPTACIÓN LABORAL CONDUCTA BAJO",
+  "PRESIÓN IMAGEN PROPIA",
+  "DOMINANCIA 78 56 62",
+  "INFLUENCIA 50 75 62",
+  "SOLIDEZ 18 26 25",
+  "CONTROL 53 50 50",
+  "© Copyright TIMS International 2026",
+  "2",
+  "\f",
+  "PERSONAL COMPETENCES ANALYSIS",
+  "Nombre: Nicolás Gallo Aranda Fecha: 26/08/2026",
   "",
   "CONDUCTAS OBSERVABLES (GRÁFICA 3)",
   "Se muestra decidido ante los retos y mantiene",
@@ -46,11 +60,10 @@ const SAMPLE = [
   "",
   "Prefiere entornos donde las reglas son claras.",
   "© Copyright TIMS International 2026",
-  "2",
+  "3",
   "\f",
   "PERSONAL COMPETENCES ANALYSIS",
-  "Nombre: Nicolás Gallo Aranda",
-  "Fecha: 26/08/2026",
+  "Nombre: Nicolás Gallo Aranda Fecha: 26/08/2026",
   "",
   "MOTIVADORES",
   "Le motiva el reconocimiento público y la",
@@ -62,11 +75,10 @@ const SAMPLE = [
   "OTROS COMENTARIOS",
   "Conviene acompañarle en tareas de detalle.",
   "© Copyright TIMS International 2026",
-  "3",
+  "4",
   "\f",
   "PERSONAL COMPETENCES ANALYSIS",
-  "Nombre: Nicolás Gallo Aranda",
-  "Fecha: 26/08/2026",
+  "Nombre: Nicolás Gallo Aranda Fecha: 26/08/2026",
   "",
   // Heading wrapped by the PDF layout.
   "CONDUCTAS OBSERVABLES (GRÁFICA",
@@ -76,40 +88,82 @@ const SAMPLE = [
   "CONDUCTAS OBSERVABLES (GRÁFICA 2)",
   "Ajusta su conducta cuando el grupo lo requiere.",
   "© Copyright TIMS International 2026",
-  "4",
+  "5",
 ].join("\n");
 
-describe("parseCompetencesReport", () => {
-  const report = parseCompetencesReport(SAMPLE);
+describe("parseCompetencesReport — real report structure", () => {
+  const report = parseCompetencesReport(REAL_SAMPLE);
 
-  it("reads the candidate name once, ignoring the repeats on later pages", () => {
+  it("separates the name from the date when both share one line", () => {
     expect(report.full_name).toBe("Nicolás Gallo Aranda");
+    // Regression: the name used to swallow the date, which corrupted both the
+    // profile name and identity matching.
+    expect(report.full_name).not.toMatch(/Fecha/);
+    expect(report.full_name).not.toMatch(/\d/);
   });
 
-  it("reads the report date", () => {
-    expect(report.report_date).toBe("26/08/2026");
+  it("normalises the report date to ISO", () => {
+    expect(report.report_date).toBe("2026-08-26");
+    expect(report.report_date_raw).toBe("26/08/2026");
   });
 
-  it("reads all three score rows as numbers, not prose", () => {
-    expect(report.scores.adaptacion_laboral?.values).toEqual([78, 50, 56, 53]);
-    expect(report.scores.conducta_bajo_presion?.values).toEqual([75, 26, 50, 62]);
-    expect(report.scores.imagen_propia?.values).toEqual([62, 62, 25, 50]);
-  });
-
-  it("keys the scores by measurement factor", () => {
-    expect(report.scores.adaptacion_laboral?.byFactor).toEqual({
-      DOMINANCIA: 78,
-      INFLUENCIA: 50,
-      SOLIDEZ: 56,
-      CONTROL: 53,
+  it("reads the authoritative 4 x 3 matrix", () => {
+    expect(report.matrix).toEqual({
+      DOMINANCIA: [78, 56, 62],
+      INFLUENCIA: [50, 75, 62],
+      SOLIDEZ: [18, 26, 25],
+      CONTROL: [53, 50, 50],
     });
   });
 
-  it("finds the four measurement factors in document order", () => {
+  it("pivots the matrix into Graph 1 scores", () => {
+    expect(report.graphs[1]).toEqual({
+      dominance: 78,
+      influence: 50,
+      steadiness: 18,
+      control: 53,
+    });
+  });
+
+  it("pivots the matrix into Graph 2 scores", () => {
+    expect(report.graphs[2]).toEqual({
+      dominance: 56,
+      influence: 75,
+      steadiness: 26,
+      control: 50,
+    });
+  });
+
+  it("pivots the matrix into Graph 3 scores", () => {
+    expect(report.graphs[3]).toEqual({
+      dominance: 62,
+      influence: 62,
+      steadiness: 25,
+      control: 50,
+    });
+  });
+
+  it("does not discard scores that look like page numbers", () => {
+    // Regression: lone 1-3 digit lines were treated as page furniture, which
+    // silently emptied every score column.
+    expect(report.scores.adaptacion_laboral?.values).toEqual([78, 50, 18, 53]);
+    expect(report.scores.conducta_bajo_presion?.values).toEqual([56, 75, 26, 50]);
+    expect(report.scores.imagen_propia?.values).toEqual([62, 62, 25, 50]);
+  });
+
+  it("lists the four measurement factors", () => {
     expect(report.factors).toEqual(["DOMINANCIA", "INFLUENCIA", "SOLIDEZ", "CONTROL"]);
   });
 
-  it("maps each graph section to its own field regardless of document order", () => {
+  it("maps each graph number to its named scale", () => {
+    expect(GRAPH_SCALES).toEqual({
+      1: "adaptacion_laboral",
+      2: "conducta_bajo_presion",
+      3: "imagen_propia",
+    });
+  });
+
+  it("maps each prose section to its own field regardless of document order", () => {
     expect(report.sections.conductas_observables_graph_1).toBe(
       "Responde bien a la presión del entorno.",
     );
@@ -135,59 +189,55 @@ describe("parseCompetencesReport", () => {
     expect(report.sections.entorno_laboral_ideal).toBe(
       "Un equipo colaborativo con objetivos medibles.",
     );
-    expect(report.sections.otros_comentarios).toBe(
-      "Conviene acompañarle en tareas de detalle.",
-    );
+    expect(report.sections.otros_comentarios).toBe("Conviene acompañarle en tareas de detalle.");
   });
 
-  it("strips page furniture out of the prose", () => {
+  it("strips repeated headers, copyright footers and page numbers from the prose", () => {
     for (const body of Object.values(report.sections)) {
       expect(body).not.toMatch(/PERSONAL COMPETENCES ANALYSIS|Copyright|Nombre:|Fecha:/);
       expect(body).not.toMatch(/^\d+$/m);
     }
   });
 
-  it("reports no warnings for a well-formed report", () => {
+  it("parses the real report with no warnings", () => {
     expect(report.warnings).toEqual([]);
   });
+});
 
-  it("reads one percentage per graph from RESUMEN POR GRÁFICO (%)", () => {
-    expect(report.graphSummary).toEqual({ 1: 59, 2: 53, 3: 50 });
-  });
-
-  it("treats the summary table and chart titles as section boundaries", () => {
-    // Regression: RESUMEN POR GRÁFICO was not a known heading, so the section
-    // before it absorbed the table's title.
+describe("parseCompetencesReport — robustness", () => {
+  it("still reads a report where the labels are on separate lines", () => {
     const parsed = parseCompetencesReport(
-      [
-        "OTROS COMENTARIOS",
-        "Un comentario final.",
-        "RESUMEN POR GRÁFICO (%)",
-        "59",
-        "53",
-        "50",
-        "GRÁFICA 1: ADAPTACIÓN LABORAL",
-        "78 50 56 53",
-      ].join("\n"),
+      ["Nombre: Ana Ramírez", "Fecha: 01/12/2025", "MOTIVADORES", "Texto."].join("\n"),
     );
-
-    expect(parsed.sections.otros_comentarios).toBe("Un comentario final.");
-    expect(parsed.sections.otros_comentarios).not.toMatch(/RESUMEN|GR[ÁA]FICA/);
-    expect(parsed.graphSummary[1]).toBe(59);
+    expect(parsed.full_name).toBe("Ana Ramírez");
+    expect(parsed.report_date).toBe("2025-12-01");
   });
 
-  it("maps each graph number to its named scale", () => {
-    expect(GRAPH_SCALES).toEqual({
-      1: "adaptacion_laboral",
-      2: "conducta_bajo_presion",
-      3: "imagen_propia",
-    });
+  it("rejects an impossible date rather than rolling it forward", () => {
+    const parsed = parseCompetencesReport("Nombre: X Fecha: 31/02/2026");
+    expect(parsed.report_date).toBeNull();
+    expect(parsed.report_date_raw).toBe("31/02/2026");
+    expect(parsed.warnings.join(" ")).toContain("31/02/2026");
+  });
+
+  it("returns a null matrix and warns when the table is absent", () => {
+    const parsed = parseCompetencesReport("Nombre: X Fecha: 01/01/2026\nMOTIVADORES\nTexto.");
+    expect(parsed.matrix).toBeNull();
+    expect(parsed.graphs).toEqual({ 1: null, 2: null, 3: null });
+    expect(parsed.warnings.join(" ")).toContain("4x3 factor matrix");
+  });
+
+  it("ignores a factor name that appears inside prose", () => {
+    const parsed = parseCompetencesReport(
+      ["MOTIVADORES", "Muestra DOMINANCIA en las reuniones de equipo."].join("\n"),
+    );
+    expect(parsed.matrix).toBeNull();
   });
 
   it("degrades instead of throwing on unrelated text", () => {
     const empty = parseCompetencesReport("Just an ordinary CV, nothing to see.");
     expect(empty.full_name).toBeNull();
-    expect(empty.scores.imagen_propia).toBeNull();
+    expect(empty.graphs[1]).toBeNull();
     expect(empty.sections.motivadores).toBeNull();
     expect(empty.warnings.length).toBeGreaterThan(0);
   });

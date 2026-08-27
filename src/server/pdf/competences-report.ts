@@ -19,9 +19,34 @@ export type ScoreBlock = {
   byFactor: Record<string, number> | null;
 };
 
+/** One graph's four measurement factors, in DISC order. */
+export type FactorScores = {
+  dominance: number;
+  influence: number;
+  steadiness: number;
+  control: number;
+};
+
+/**
+ * Scores per graph:
+ *   1 = ADAPTACION LABORAL   2 = CONDUCTA BAJO PRESION   3 = IMAGEN PROPIA
+ */
+export type GraphScores = {
+  1: FactorScores | null;
+  2: FactorScores | null;
+  3: FactorScores | null;
+};
+
 export type CompetencesReport = {
   full_name: string | null;
+  /** ISO `YYYY-MM-DD`, or null when the date could not be read or parsed. */
   report_date: string | null;
+  /** Exactly as printed, e.g. "26/08/2026". Kept for diagnostics. */
+  report_date_raw: string | null;
+  /** The 4 x 3 matrix keyed by factor, values ordered graph 1, 2, 3. */
+  matrix: Record<string, number[]> | null;
+  /** The same matrix pivoted per graph. Graph 1 is the working DISC profile. */
+  graphs: GraphScores;
   scores: {
     adaptacion_laboral: ScoreBlock | null;
     conducta_bajo_presion: ScoreBlock | null;
@@ -210,8 +235,36 @@ function toLines(text: string): Line[] {
 }
 
 /** First "Nombre:" / "Fecha:" wins; later repeats are page furniture. */
+/** "26/08/2026" -> "2026-08-26". Returns null for anything that is not a real date. */
+function toIsoDate(value: string | null): string | null {
+  if (!value) return null;
+  const match = value.trim().match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/);
+  if (!match) return null;
+
+  const [, day, month, year] = match;
+  const iso = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  const parsed = new Date(`${iso}T00:00:00Z`);
+
+  // Rejects 31/02 and similar, which Date would otherwise roll forward.
+  return Number.isNaN(parsed.getTime()) || !parsed.toISOString().startsWith(iso)
+    ? null
+    : iso;
+}
+
+/** Labels that can appear on the header line. A value ends where the next one begins. */
+const HEADER_LABELS = ["Nombre", "Fecha"];
+
 function readLabelled(lines: Line[], label: string): string | null {
-  const pattern = new RegExp(`^\\s*${label}\\s*[:.-]?\\s*(.*)$`, "i");
+  // The real report puts both labels on ONE line:
+  //   "Nombre: Nicolás Gallo Aranda Fecha: 26/08/2026"
+  // So the label is matched anywhere on the line (not just at the start), and
+  // the value is captured lazily up to the next label or end of line. Anchoring
+  // at `^` was why the date never parsed and why the name absorbed it.
+  const nextLabel = HEADER_LABELS.map((l) => `${l}\\s*[:.\\-]`).join("|");
+  const pattern = new RegExp(
+    `(?:^|\\s)${label}\\s*[:.\\-]?\\s*(.*?)(?=\\s*(?:${nextLabel})|$)`,
+    "i",
+  );
 
   for (let i = 0; i < lines.length; i += 1) {
     const match = lines[i].raw.match(pattern);
@@ -243,11 +296,15 @@ function readScores(lines: Line[], heading: string): number[] | null {
 
   const values: number[] = [...numbersIn(lines[start].raw.replace(/[^\d\s]/g, " "))];
 
+  // The page-number noise rule must NOT be applied here. It classifies any lone
+  // 1-3 digit line as page furniture, and in the real report every score sits on
+  // its own line exactly like that — applying it discarded almost every value.
+  // The run is read as strictly contiguous instead: the first non-numeric line
+  // ends the block, so a scale can never absorb the next section.
   for (let i = start + 1; i < lines.length && values.length < 4; i += 1) {
     const line = lines[i];
     if (!line.raw) continue;
     if (line.heading) break;
-    if (isNoise(line.key)) continue;
     if (!isNumericRow(line.raw)) break;
     values.push(...numbersIn(line.raw));
   }
@@ -324,6 +381,58 @@ function readGraphSummary(lines: Line[]): { 1: number | null; 2: number | null; 
   return { 1: values[0] ?? null, 2: values[1] ?? null, 3: values[2] ?? null };
 }
 
+/**
+ * The 4 x 3 score matrix, read from the summary table.
+ *
+ * The real report lays this out one factor per line, one graph per column:
+ *
+ *   DOMINANCIA 78 56 62
+ *   INFLUENCIA 50 75 62
+ *   SOLIDEZ    18 26 25
+ *   CONTROL    53 50 50
+ *
+ * which is the authoritative source for every value — the per-scale blocks
+ * elsewhere in the document are a chart rendering of the same numbers.
+ *
+ * Returns null unless all four factors were found, so a partial read never
+ * silently produces a lopsided profile.
+ */
+function readFactorMatrix(lines: Line[]): Record<string, number[]> | null {
+  const matrix: Record<string, number[]> = {};
+
+  for (const line of lines) {
+    if (!line.raw) continue;
+
+    for (const factor of MEASUREMENT_FACTORS) {
+      if (matrix[factor]) continue;
+      // Anchored so a factor named inside prose cannot match.
+      const pattern = new RegExp(`^${factor}\\b([\\d\\s.,]+)$`);
+      const match = line.key.match(pattern);
+      if (!match) continue;
+
+      const values = numbersIn(match[1]);
+      if (values.length >= 3) matrix[factor] = values.slice(0, 3);
+    }
+  }
+
+  return MEASUREMENT_FACTORS.every((factor) => matrix[factor]) ? matrix : null;
+}
+
+/** Pivots the factor-per-row matrix into one D/I/S/C set per graph. */
+function toGraphScores(matrix: Record<string, number[]> | null): GraphScores {
+  const empty: GraphScores = { 1: null, 2: null, 3: null };
+  if (!matrix) return empty;
+
+  const at = (index: number): FactorScores => ({
+    dominance: matrix.DOMINANCIA[index],
+    influence: matrix.INFLUENCIA[index],
+    steadiness: matrix.SOLIDEZ[index],
+    control: matrix.CONTROL[index],
+  });
+
+  return { 1: at(0), 2: at(1), 3: at(2) };
+}
+
 function zipByFactor(values: number[], factors: string[]): Record<string, number> | null {
   if (factors.length !== 4 || values.length !== 4) return null;
   return Object.fromEntries(factors.map((factor, i) => [factor, values[i]]));
@@ -342,8 +451,13 @@ export function parseCompetencesReport(text: string): CompetencesReport {
   const full_name = readLabelled(lines, "Nombre");
   if (!full_name) warnings.push('No "Nombre:" line was found.');
 
-  const report_date = readLabelled(lines, "Fecha");
-  if (!report_date) warnings.push('No "Fecha:" line was found.');
+  const report_date_raw = readLabelled(lines, "Fecha");
+  if (!report_date_raw) warnings.push('No "Fecha:" line was found.');
+
+  const report_date = toIsoDate(report_date_raw);
+  if (report_date_raw && !report_date) {
+    warnings.push(`Could not read "${report_date_raw}" as a date.`);
+  }
 
   // Reported in the order the document lists them, not the order declared here.
   const knownFactors: string[] = [...MEASUREMENT_FACTORS];
@@ -352,11 +466,10 @@ export function parseCompetencesReport(text: string): CompetencesReport {
     .filter((heading): heading is string => heading !== null && knownFactors.includes(heading))
     .filter((heading, index, all) => all.indexOf(heading) === index);
 
-  if (factors.length !== knownFactors.length) {
-    warnings.push(
-      `Expected ${knownFactors.length} measurement factors, found ${factors.length}.`,
-    );
-  }
+  // No warning when the factor names are absent as standalone lines: in the real
+  // report they only ever appear as the leading cell of a matrix row
+  // ("DOMINANCIA 78 56 62"), which readFactorMatrix handles. The matrix is what
+  // actually matters, and its absence is warned about separately below.
 
   const scores = {} as CompetencesReport["scores"];
   for (const { key, heading } of SCORE_HEADINGS) {
@@ -380,10 +493,27 @@ export function parseCompetencesReport(text: string): CompetencesReport {
   }
 
   const graphSummary = readGraphSummary(lines);
-  const hasSummaryHeading = lines.some((line) => line.heading === SUMMARY_HEADING);
-  if (hasSummaryHeading && graphSummary[1] === null) {
-    warnings.push('"RESUMEN POR GRAFICO" was found but no percentages could be read from it.');
+
+  const matrix = readFactorMatrix(lines);
+  const graphs = toGraphScores(matrix);
+  if (!matrix) {
+    warnings.push("The 4x3 factor matrix could not be read; DISC is unavailable.");
   }
 
-  return { full_name, report_date, scores, factors, graphSummary, sections, warnings };
+  // The factor list is whatever the matrix actually yielded, falling back to any
+  // standalone factor headings for report variants laid out that way.
+  const resolvedFactors = matrix ? Object.keys(matrix) : factors;
+
+  return {
+    full_name,
+    report_date,
+    report_date_raw,
+    matrix,
+    graphs,
+    scores,
+    factors: resolvedFactors,
+    graphSummary,
+    sections,
+    warnings,
+  };
 }

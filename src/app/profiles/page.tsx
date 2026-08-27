@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { DiscCardSummary } from "@/components/disc-profile";
+import { ProfileActions } from "@/components/profile-actions";
 import { ProfileFilters } from "@/components/profile-filters";
 import { ButtonLink, Chip, EmptyState, PageHeader } from "@/components/ui";
 import { listProfiles, listTraitOptions } from "@/server/profiles";
@@ -33,6 +35,12 @@ export default async function ProfilesPage({ searchParams }: PageProps<"/profile
         action={<ButtonLink href="/profiles/new">New profile</ButtonLink>}
       />
 
+      {params.deleted ? (
+        <p className="mb-4 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          Candidato eliminado correctamente.
+        </p>
+      ) : null}
+
       <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
         <ProfileFilters
           capabilityOptions={options.capabilities}
@@ -45,28 +53,49 @@ export default async function ProfilesPage({ searchParams }: PageProps<"/profile
             <EmptyState>No profiles match these filters.</EmptyState>
           ) : (
             profiles.map((profile) => (
-              <Link
+              // Not one big <Link> any more: the actions menu is a button, and a
+              // button nested inside an anchor is invalid markup that swallows
+              // its own clicks. The candidate's name carries the link instead.
+              <div
                 key={profile.id}
-                href={`/profiles/${profile.id}`}
-                className="block rounded-lg border border-slate-200 bg-white p-5 hover:border-slate-400"
+                className="rounded-lg border border-slate-200 bg-white p-5 transition-colors hover:border-slate-400"
               >
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <h2 className="text-lg font-semibold">{profile.full_name}</h2>
-                  <span className="text-sm text-slate-500">
-                    {profile.experience_years === null
-                      ? "Experience not recorded"
-                      : `${profile.experience_years} yrs experience`}
-                  </span>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="text-lg font-semibold">
+                      <Link
+                        href={`/profiles/${profile.id}`}
+                        className="hover:underline focus:underline focus:outline-none"
+                      >
+                        {profile.full_name}
+                      </Link>
+                    </h2>
+                    <p className="mt-0.5 text-sm text-slate-600">
+                      {[profile.position, profile.department].filter(Boolean).join(" · ") ||
+                        "Sin cargo registrado"}
+                    </p>
+                    <p className="text-sm text-slate-500">
+                      {profile.experience_years === null
+                        ? "Experiencia no registrada"
+                        : `${profile.experience_years} años de experiencia`}
+                    </p>
+                  </div>
+
+                  <ProfileActions
+                    profile={{
+                      id: profile.id,
+                      full_name: profile.full_name,
+                      position: profile.position,
+                      department: profile.department,
+                      education: profile.education,
+                      experience_years: profile.experience_years,
+                    }}
+                  />
                 </div>
 
-                <p className="mt-0.5 text-sm text-slate-600">
-                  {[profile.position, profile.department].filter(Boolean).join(" · ") ||
-                    "No position recorded"}
-                </p>
-
-                {profile.summary ? (
-                  <p className="mt-3 line-clamp-2 text-sm text-slate-600">{profile.summary}</p>
-                ) : null}
+                <div className="mt-4 border-t border-slate-100 pt-4">
+                  <DiscCardSummary graph1={profile.graph1} />
+                </div>
 
                 {profile.capabilities.length + profile.attitudes.length > 0 ? (
                   <div className="mt-4 flex flex-wrap gap-1.5">
@@ -78,7 +107,7 @@ export default async function ProfilesPage({ searchParams }: PageProps<"/profile
                     ))}
                   </div>
                 ) : null}
-              </Link>
+              </div>
             ))
           )}
         </div>

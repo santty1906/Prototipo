@@ -4,10 +4,10 @@ import { UPLOAD } from "@/lib/env";
 import { getAdminSupabase } from "@/lib/supabase/admin";
 import type { DocumentRow, ProcessingStatus } from "@/lib/supabase/database.types";
 import {
-  GRAPH_SCALES,
   parseCompetencesReport,
   type CompetencesReport,
 } from "@/server/pdf/competences-report";
+import { classifyDisc, type DiscProfile } from "@/server/pdf/disc";
 import { extractPdfText } from "@/server/pdf/extract-text";
 import { extractTraits, type Trait } from "@/server/pdf/traits";
 
@@ -199,15 +199,13 @@ export async function createDocumentViewUrl(documentId: string) {
 }
 
 /**
- * Which graph supplies the four factor columns on `profile_assessments`.
+ * Which graph is treated as the working DISC profile.
  *
- * The report measures all four factors on all three graphs (12 numbers), but the
- * assessment row has four factor columns. Graph 1 — ADAPTACION LABORAL — is used
- * because it describes behaviour at work, which is what a talent profile is for.
- * The complete matrix is stored in `raw_scores` regardless, so changing this
- * constant and re-processing is enough to revise the choice.
+ * Graph 1 is ADAPTACION LABORAL — how the person behaves at work — which is what
+ * a talent profile is about. Graphs 2 and 3 are preserved in `raw_scores` and
+ * are never discarded, so this choice is presentational rather than lossy.
  */
-const FACTOR_SOURCE_GRAPH = 1 as const;
+const PROFILE_GRAPH = 1 as const;
 
 export type ProcessedDocument = {
   documentId: string;
@@ -216,45 +214,51 @@ export type ProcessedDocument = {
   characters: number;
   profileId: string;
   profileCreated: boolean;
+  disc: DiscProfile | null;
   capabilities: Trait[];
   attitudes: Trait[];
   report: CompetencesReport;
 };
 
-/** Maps a parsed report onto the columns of `profile_assessments`. */
-function toAssessmentScores(report: CompetencesReport) {
-  const factorScores = report.scores[GRAPH_SCALES[FACTOR_SOURCE_GRAPH]];
-  const [dominance, influence, steadiness, control] = factorScores?.values ?? [];
+/**
+ * Maps a parsed report onto the columns of `profile_assessments`.
+ *
+ * The four factor columns come from graph 1. The three per-scale columns are
+ * left NULL on purpose: the real report has no single numeric value for
+ * ADAPTACION LABORAL / CONDUCTA BAJO PRESION / IMAGEN PROPIA — each is a set of
+ * four factor scores, already captured in `raw_scores`. Writing anything there
+ * would mean inventing a number the PDF does not contain.
+ */
+function toAssessmentScores(report: CompetencesReport, disc: DiscProfile | null) {
+  const profileGraph = report.graphs[PROFILE_GRAPH];
 
   return {
-    dominance: dominance ?? null,
-    influence: influence ?? null,
-    steadiness: steadiness ?? null,
-    control: control ?? null,
-    adaptacion_laboral: report.graphSummary[1],
-    conducta_bajo_presion: report.graphSummary[2],
-    imagen_propia: report.graphSummary[3],
-    // The full 3x4 matrix, so nothing the report measured is lost.
+    dominance: profileGraph?.dominance ?? null,
+    influence: profileGraph?.influence ?? null,
+    steadiness: profileGraph?.steadiness ?? null,
+    control: profileGraph?.control ?? null,
+
+    // No numeric source in the report — see the note above.
+    adaptacion_laboral: null,
+    conducta_bajo_presion: null,
+    imagen_propia: null,
+
     raw: {
-      factorSourceGraph: FACTOR_SOURCE_GRAPH,
-      factors: report.factors,
-      graphs: {
-        1: report.scores.adaptacion_laboral?.values ?? null,
-        2: report.scores.conducta_bajo_presion?.values ?? null,
-        3: report.scores.imagen_propia?.values ?? null,
-      },
+      profileGraph: PROFILE_GRAPH,
+      // Factor-per-row, graph-per-column, exactly as printed.
+      matrix: report.matrix,
+      // The same numbers pivoted per graph, for convenience.
+      graphs: report.graphs,
+      disc: disc
+        ? {
+            primary: disc.primary.letter,
+            secondary: disc.secondary.letter,
+            combination: disc.combination,
+            scores: Object.fromEntries(disc.ranked.map((f) => [f.letter, f.score])),
+          }
+        : null,
     },
   };
-}
-
-/** "26/08/2026" -> "2026-08-26". Returns null for anything else. */
-function toIsoDate(value: string | null): string | null {
-  if (!value) return null;
-  const match = value.trim().match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/);
-  if (!match) return null;
-  const [, day, month, year] = match;
-  const iso = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-  return Number.isNaN(Date.parse(iso)) ? null : iso;
 }
 
 /**
@@ -313,13 +317,15 @@ export async function processDocument(documentId: string): Promise<ProcessedDocu
       );
     }
 
+    const profileGraph = report.graphs[PROFILE_GRAPH];
+    const disc = profileGraph ? classifyDisc(profileGraph) : null;
     const { capabilities, attitudes } = extractTraits(report.sections);
 
     const { data: applied, error: rpcError } = await supabase.rpc("apply_document_analysis", {
       p_document_id: documentId,
       p_full_name: report.full_name,
-      p_report_date: toIsoDate(report.report_date),
-      p_scores: toAssessmentScores(report),
+      p_report_date: report.report_date,
+      p_scores: toAssessmentScores(report, disc),
       p_sections: {
         conductas_observables_1: report.sections.conductas_observables_graph_1,
         conductas_observables_2: report.sections.conductas_observables_graph_2,
@@ -344,6 +350,7 @@ export async function processDocument(documentId: string): Promise<ProcessedDocu
       characters: extracted.text.length,
       profileId: applied.profile_id,
       profileCreated: applied.profile_created,
+      disc,
       capabilities,
       attitudes,
       report,

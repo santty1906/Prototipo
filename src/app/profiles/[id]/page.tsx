@@ -1,9 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { AiConsultant } from "@/components/ai-consultant";
+import { DiscProfilePanel } from "@/components/disc-profile";
 import { DocumentLink } from "@/components/document-link";
+import { ProfileActions } from "@/components/profile-actions";
 import { Card, Chip, EmptyState, PageHeader, StatusBadge } from "@/components/ui";
 import { formatBytes, formatDate } from "@/lib/format";
+import { classifyDisc } from "@/server/pdf/disc";
 import { getProfile } from "@/server/profiles";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +17,14 @@ export default async function ProfilePage({ params }: PageProps<"/profiles/[id]"
   const profile = await getProfile(id);
 
   if (!profile) notFound();
+
+  // Shown in the consultant header so the reader knows which profile is loaded.
+  const discSummary = profile.graphs[1]
+    ? (() => {
+        const disc = classifyDisc(profile.graphs[1]);
+        return `${disc.combination} — ${disc.combinationNameEs}`;
+      })()
+    : null;
 
   const facts = [
     { label: "Email", value: profile.email },
@@ -36,11 +48,55 @@ export default async function ProfilePage({ params }: PageProps<"/profiles/[id]"
         <PageHeader
           title={profile.full_name}
           description={`Added ${formatDate(profile.created_at)}`}
+          action={
+            <ProfileActions
+              showView={false}
+              profile={{
+                id: profile.id,
+                full_name: profile.full_name,
+                position: profile.position,
+                department: profile.department,
+                education: profile.education,
+                experience_years: profile.experience_years,
+              }}
+            />
+          }
         />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         <div className="space-y-6">
+          <DiscProfilePanel graphs={profile.graphs} />
+
+          {profile.assessment ? (
+            <Card>
+              <h2 className="mb-3 text-sm font-medium text-slate-600">Informe de competencias</h2>
+              <div className="space-y-4 text-sm leading-relaxed">
+                <ReportSection
+                  title="Conductas observables — Gráfica 1 (Adaptación Laboral)"
+                  body={profile.assessment.conductas_observables_1}
+                />
+                <ReportSection
+                  title="Conductas observables — Gráfica 2 (Conducta Bajo Presión)"
+                  body={profile.assessment.conductas_observables_2}
+                />
+                <ReportSection
+                  title="Conductas observables — Gráfica 3 (Imagen Propia)"
+                  body={profile.assessment.conductas_observables_3}
+                />
+                <ReportSection title="Motivadores" body={profile.assessment.motivadores} />
+                <ReportSection
+                  title="Entorno laboral ideal"
+                  body={profile.assessment.entorno_laboral_ideal}
+                />
+                <ReportSection
+                  title="Otros comentarios"
+                  body={profile.assessment.otros_comentarios}
+                />
+              </div>
+            </Card>
+          ) : null}
+
           {profile.summary ? (
             <Card>
               <h2 className="mb-2 text-sm font-medium text-slate-600">Summary</h2>
@@ -108,18 +164,37 @@ export default async function ProfilePage({ params }: PageProps<"/profiles/[id]"
           </section>
         </div>
 
-        <Card className="h-fit">
-          <h2 className="mb-3 text-sm font-medium text-slate-600">Details</h2>
-          <dl className="space-y-3 text-sm">
-            {facts.map((fact) => (
-              <div key={fact.label}>
-                <dt className="text-slate-500">{fact.label}</dt>
-                <dd className="mt-0.5 break-words">{fact.value ?? "—"}</dd>
-              </div>
-            ))}
-          </dl>
-        </Card>
+        <div className="h-fit space-y-4">
+          <AiConsultant
+            profileId={profile.id}
+            profileName={profile.full_name}
+            discSummary={discSummary}
+          />
+
+          <Card>
+            <h2 className="mb-3 text-sm font-medium text-slate-600">Details</h2>
+            <dl className="space-y-3 text-sm">
+              {facts.map((fact) => (
+                <div key={fact.label}>
+                  <dt className="text-slate-500">{fact.label}</dt>
+                  <dd className="mt-0.5 break-words">{fact.value ?? "—"}</dd>
+                </div>
+              ))}
+            </dl>
+          </Card>
+        </div>
       </div>
     </>
+  );
+}
+
+/** One titled block of report prose. Renders nothing when the section is absent. */
+function ReportSection({ title, body }: { title: string; body: string | null }) {
+  if (!body) return null;
+  return (
+    <div>
+      <h3 className="mb-1 text-sm font-medium">{title}</h3>
+      <p className="whitespace-pre-wrap text-slate-700">{body}</p>
+    </div>
   );
 }
