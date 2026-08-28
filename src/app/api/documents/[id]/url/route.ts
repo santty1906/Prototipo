@@ -22,6 +22,6 @@ export async function GET(_request: Request, ctx: RouteContext<"/api/documents/[
       return NextResponse.json({ error: cause.message }, { status: cause.status });
     }
     console.error("signed url failed", cause);
-    return NextResponse.json({ error: "Could not create a link." }, { status: 500 });
+    return NextResponse.json({ error: "No se pudo generar el enlace." }, { status: 500 });
   }
 }

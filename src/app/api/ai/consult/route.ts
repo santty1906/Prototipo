@@ -29,12 +29,12 @@ const MAX_MESSAGE_CHARS = 2000;
 const MAX_HISTORY_TURNS = 20;
 
 const schema = z.object({
-  profileId: z.string().uuid("A valid profile id is required."),
+  profileId: z.string().uuid("Se requiere un identificador de perfil válido."),
   message: z
     .string()
     .trim()
-    .min(1, "The message cannot be empty.")
-    .max(MAX_MESSAGE_CHARS, `Messages are limited to ${MAX_MESSAGE_CHARS} characters.`),
+    .min(1, "El mensaje no puede estar vacío.")
+    .max(MAX_MESSAGE_CHARS, `Los mensajes están limitados a ${MAX_MESSAGE_CHARS} caracteres.`),
   history: z
     .array(
       z.object({
@@ -51,7 +51,7 @@ export async function POST(request: Request) {
   // Cheap guard before parsing: refuse an oversized body outright.
   const declaredLength = Number(request.headers.get("content-length") ?? 0);
   if (declaredLength > 100_000) {
-    return NextResponse.json({ error: "Request too large." }, { status: 413 });
+    return NextResponse.json({ error: "La petición es demasiado grande." }, { status: 413 });
   }
 
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Malformed JSON body." }, { status: 400 });
+    return NextResponse.json({ error: "El cuerpo de la petición no es JSON válido." }, { status: 400 });
   }
 
   const parsed = schema.safeParse(body);
@@ -87,7 +87,7 @@ export async function POST(request: Request) {
   try {
     const context = await buildProfileContext(profileId);
     if (!context) {
-      return NextResponse.json({ error: "Profile not found." }, { status: 404 });
+      return NextResponse.json({ error: "Perfil no encontrado." }, { status: 404 });
     }
 
     const client = new Anthropic();

@@ -39,7 +39,7 @@ export function formatBytes(bytes: number | null) {
 }
 
 export function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString(undefined, {
+  return new Date(iso).toLocaleDateString("es-ES", {
     year: "numeric",
     month: "short",
     day: "numeric",

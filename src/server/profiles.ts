@@ -9,6 +9,8 @@ import type {
   Trait,
 } from "@/lib/supabase/database.types";
 import type { FactorScores, GraphScores } from "@/server/pdf/competences-report";
+import { discCombinationOf, type DiscCombination } from "@/server/pdf/disc";
+import { traitLabelEs } from "@/server/pdf/traits";
 
 export type TraitOption = { code: string; label: string };
 
@@ -23,6 +25,13 @@ export type ProfileFilters = {
   q?: string;
   capabilities?: string[];
   attitudes?: string[];
+  /**
+   * DISC combinations to keep, e.g. ["DI", "CS"].
+   *
+   * OR within the list — a candidate matches if their classification is any one
+   * of them — and AND against the other filters, like every filter here.
+   */
+  disc?: DiscCombination[];
 };
 
 const PAGE_SIZE = 50;
@@ -62,7 +71,7 @@ async function profileIdsWithAllTraits(
     .select("profile_id, code")
     .in("code", codes);
 
-  if (error) throw new Error(`Could not filter by ${table}: ${error.message}`);
+  if (error) throw new Error(`No se pudo aplicar el filtro de ${table}: ${error.message}`);
 
   const matchedPerProfile = new Map<string, Set<string>>();
   for (const row of data ?? []) {
@@ -74,6 +83,34 @@ async function profileIdsWithAllTraits(
   return [...matchedPerProfile]
     .filter(([, matched]) => matched.size === codes.length)
     .map(([profileId]) => profileId);
+}
+
+/**
+ * Profile ids whose DISC classification is one of `combinations` (OR).
+ *
+ * Server-side on purpose. The classification is derived, not stored, so it
+ * cannot be expressed as a PostgREST predicate — but it still has to narrow the
+ * set *before* the page limit is applied, or a candidate on page two would
+ * simply never appear. Deriving it here keeps the filter and the profile card
+ * reading the same numbers through the same function.
+ *
+ * Returns `null` when nothing was requested, meaning "no constraint". A profile
+ * with no processed assessment has no classification and so matches nothing.
+ */
+async function profileIdsWithDiscCombination(
+  combinations: DiscCombination[],
+): Promise<string[] | null> {
+  if (combinations.length === 0) return null;
+
+  const wanted = new Set<string>(combinations);
+  const graph1ByProfile = await graph1ScoresByProfile(null);
+
+  const ids: string[] = [];
+  for (const [profileId, scores] of graph1ByProfile) {
+    if (wanted.has(discCombinationOf(scores))) ids.push(profileId);
+  }
+
+  return ids;
 }
 
 function intersect(a: string[] | null, b: string[] | null) {
@@ -97,11 +134,11 @@ async function traitsByProfile(
     .in("profile_id", profileIds)
     .order("label");
 
-  if (error) throw new Error(`Could not load ${table}: ${error.message}`);
+  if (error) throw new Error(`No se pudieron cargar los datos de ${table}: ${error.message}`);
 
   for (const row of data ?? []) {
     const list = grouped.get(row.profile_id) ?? [];
-    list.push({ code: row.code, label: row.label });
+    list.push({ code: row.code, label: traitLabelEs(row.code, row.label) });
     grouped.set(row.profile_id, list);
   }
 
@@ -111,10 +148,16 @@ async function traitsByProfile(
 export async function listProfiles(filters: ProfileFilters = {}): Promise<ProfileListItem[]> {
   const capabilityCodes = filters.capabilities ?? [];
   const attitudeCodes = filters.attitudes ?? [];
+  const discCombinations = filters.disc ?? [];
 
+  // Each filter contributes a set of ids, or `null` for "not applied". They are
+  // intersected, so filters narrow together rather than competing.
   const allowedIds = intersect(
-    await profileIdsWithAllTraits("profile_capabilities", capabilityCodes),
-    await profileIdsWithAllTraits("profile_attitudes", attitudeCodes),
+    intersect(
+      await profileIdsWithAllTraits("profile_capabilities", capabilityCodes),
+      await profileIdsWithAllTraits("profile_attitudes", attitudeCodes),
+    ),
+    await profileIdsWithDiscCombination(discCombinations),
   );
 
   // A filter was applied and nothing matched — skip the second round trip.
@@ -133,7 +176,7 @@ export async function listProfiles(filters: ProfileFilters = {}): Promise<Profil
   if (allowedIds !== null) query = query.in("id", allowedIds);
 
   const { data, error } = await query;
-  if (error) throw new Error(`Could not load profiles: ${error.message}`);
+  if (error) throw new Error(`No se pudieron cargar los perfiles: ${error.message}`);
 
   const profiles = data ?? [];
   const ids = profiles.map((p) => p.id);
@@ -158,21 +201,26 @@ function readGraph1(rawScores: unknown): FactorScores | null {
 }
 
 /**
- * Graph 1 scores for a set of profiles, newest assessment per profile.
+ * Graph 1 scores per profile, taken from each profile's newest assessment.
  *
- * One extra query for the whole page rather than one per card.
+ * One extra query for the whole page rather than one per card. Pass `null` for
+ * every profile — that is what the DISC filter needs, since it has to know the
+ * classification of candidates it has not selected yet.
  */
-async function graph1ScoresByProfile(profileIds: string[]) {
+async function graph1ScoresByProfile(profileIds: string[] | null) {
   const byProfile = new Map<string, FactorScores>();
-  if (profileIds.length === 0) return byProfile;
+  if (profileIds !== null && profileIds.length === 0) return byProfile;
 
-  const { data, error } = await getAdminSupabase()
+  let query = getAdminSupabase()
     .from("profile_assessments")
     .select("profile_id, raw_scores, created_at")
-    .in("profile_id", profileIds)
     .order("created_at", { ascending: false });
 
-  if (error) throw new Error(`Could not load assessments: ${error.message}`);
+  if (profileIds !== null) query = query.in("profile_id", profileIds);
+
+  const { data, error } = await query;
+
+  if (error) throw new Error(`No se pudieron cargar las evaluaciones: ${error.message}`);
 
   for (const row of data ?? []) {
     // Ordered newest-first, so the first row seen per profile is the current one.
@@ -203,7 +251,7 @@ export async function getProfile(id: string): Promise<ProfileDetail | null> {
     .eq("id", id)
     .maybeSingle();
 
-  if (error) throw new Error(`Could not load profile: ${error.message}`);
+  if (error) throw new Error(`No se pudo cargar el perfil: ${error.message}`);
   if (!profile) return null;
 
   const [capabilities, attitudes, documents, assessments] = await Promise.all([
@@ -223,7 +271,7 @@ export async function getProfile(id: string): Promise<ProfileDetail | null> {
   ]);
 
   const toOptions = (rows: Trait[] | null) =>
-    (rows ?? []).map(({ code, label }) => ({ code, label }));
+    (rows ?? []).map(({ code, label }) => ({ code, label: traitLabelEs(code, label) }));
 
   const assessment = assessments.data?.[0] ?? null;
 
@@ -262,7 +310,7 @@ export async function listTraitOptions() {
 
   const dedupe = (rows: { code: string; label: string }[] | null): TraitOption[] => {
     const byCode = new Map<string, string>();
-    for (const row of rows ?? []) byCode.set(row.code, row.label);
+    for (const row of rows ?? []) byCode.set(row.code, traitLabelEs(row.code, row.label));
     return [...byCode]
       .map(([code, label]) => ({ code, label }))
       .sort((a, b) => a.label.localeCompare(b.label));
@@ -297,7 +345,7 @@ export async function createProfile(input: NewProfileInput) {
     .select("id")
     .single();
 
-  if (error) throw new Error(`Could not create the profile: ${error.message}`);
+  if (error) throw new Error(`No se pudo crear el perfil: ${error.message}`);
 
   const traitRows = (traits: TraitOption[]) =>
     traits.map((trait) => ({ profile_id: data.id, ...trait }));
@@ -306,14 +354,14 @@ export async function createProfile(input: NewProfileInput) {
     const { error: capError } = await supabase
       .from("profile_capabilities")
       .insert(traitRows(capabilities));
-    if (capError) throw new Error(`Could not save capabilities: ${capError.message}`);
+    if (capError) throw new Error(`No se pudieron guardar las competencias: ${capError.message}`);
   }
 
   if (attitudes.length > 0) {
     const { error: attError } = await supabase
       .from("profile_attitudes")
       .insert(traitRows(attitudes));
-    if (attError) throw new Error(`Could not save attitudes: ${attError.message}`);
+    if (attError) throw new Error(`No se pudieron guardar las actitudes: ${attError.message}`);
   }
 
   return data.id;
@@ -345,8 +393,8 @@ export async function updateProfile(id: string, input: UpdateProfileInput) {
     .select("id")
     .maybeSingle();
 
-  if (error) throw new Error(`Could not update the profile: ${error.message}`);
-  if (!data) throw new Error("Profile not found.");
+  if (error) throw new Error(`No se pudo actualizar el perfil: ${error.message}`);
+  if (!data) throw new Error("Candidato no encontrado.");
 
   return data.id;
 }
@@ -381,7 +429,7 @@ export async function deleteProfile(id: string): Promise<DeletedProfileSummary> 
     .eq("profile_id", id);
 
   if (documentsError) {
-    throw new Error(`Could not load the candidate's documents: ${documentsError.message}`);
+    throw new Error(`No se pudieron cargar los documentos del candidato: ${documentsError.message}`);
   }
 
   const paths = (documents ?? []).map((document) => document.storage_path);
@@ -393,7 +441,7 @@ export async function deleteProfile(id: string): Promise<DeletedProfileSummary> 
       .remove(paths);
 
     if (storageError) {
-      throw new Error(`Could not remove the stored files: ${storageError.message}`);
+      throw new Error(`No se pudieron eliminar los archivos almacenados: ${storageError.message}`);
     }
     storageObjectsDeleted = removed?.length ?? 0;
 
@@ -404,13 +452,13 @@ export async function deleteProfile(id: string): Promise<DeletedProfileSummary> 
       .eq("profile_id", id);
 
     if (deleteDocumentsError) {
-      throw new Error(`Could not delete the documents: ${deleteDocumentsError.message}`);
+      throw new Error(`No se pudieron eliminar los documentos: ${deleteDocumentsError.message}`);
     }
   }
 
   // Cascades to capabilities, attitudes and any remaining assessments.
   const { error } = await supabase.from("profiles").delete().eq("id", id);
-  if (error) throw new Error(`Could not delete the candidate: ${error.message}`);
+  if (error) throw new Error(`No se pudo eliminar el candidato: ${error.message}`);
 
   return { documentsDeleted: paths.length, storageObjectsDeleted };
 }

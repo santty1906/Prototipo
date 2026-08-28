@@ -35,6 +35,6 @@ export async function POST(_request: Request, ctx: RouteContext<"/api/documents/
       return NextResponse.json({ error: cause.message }, { status: cause.status });
     }
     console.error("process failed", cause);
-    return NextResponse.json({ error: "Could not process the document." }, { status: 500 });
+    return NextResponse.json({ error: "No se pudo procesar el documento." }, { status: 500 });
   }
 }

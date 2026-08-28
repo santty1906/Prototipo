@@ -5,8 +5,8 @@ export default function NewProfilePage() {
   return (
     <div className="mx-auto max-w-2xl">
       <PageHeader
-        title="New profile"
-        description="Only the name is required — the rest can be filled in later."
+        title="Nuevo perfil"
+        description="Solo el nombre es obligatorio; el resto puede completarse más adelante."
       />
       <NewProfileForm />
     </div>

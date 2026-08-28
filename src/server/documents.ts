@@ -25,7 +25,7 @@ export async function listDocuments(limit = 25): Promise<DocumentWithProfile[]> 
     .order("created_at", { ascending: false })
     .limit(limit);
 
-  if (error) throw new Error(`Could not load documents: ${error.message}`);
+  if (error) throw new Error(`No se pudieron cargar los documentos: ${error.message}`);
 
   const documents = data ?? [];
   const profileIds = [...new Set(documents.map((d) => d.profile_id).filter((id) => id !== null))];
@@ -37,7 +37,7 @@ export async function listDocuments(limit = 25): Promise<DocumentWithProfile[]> 
       .select("id, full_name")
       .in("id", profileIds);
 
-    if (profileError) throw new Error(`Could not load profile names: ${profileError.message}`);
+    if (profileError) throw new Error(`No se pudieron cargar los nombres de los perfiles: ${profileError.message}`);
     for (const profile of profiles ?? []) names.set(profile.id, profile.full_name);
   }
 
@@ -55,7 +55,7 @@ export async function countDocumentsByStatus() {
     .from("documents")
     .select("processing_status");
 
-  if (error) throw new Error(`Could not count documents: ${error.message}`);
+  if (error) throw new Error(`No se pudieron contar los documentos: ${error.message}`);
 
   const counts: Record<ProcessingStatus, number> = {
     UPLOADING: 0,
@@ -96,11 +96,11 @@ export async function createUploadTicket(input: {
   profileId: string | null;
 }) {
   if (input.mimeType !== UPLOAD.mimeType) {
-    throw new UploadError("Only PDF files are accepted.");
+    throw new UploadError("Solo se aceptan archivos PDF.");
   }
   if (input.fileSize <= 0 || input.fileSize > UPLOAD.maxBytes) {
     throw new UploadError(
-      `"${input.fileName}" is larger than the ${UPLOAD.maxBytes / 1024 / 1024} MB limit.`,
+      `"${input.fileName}" supera el límite de ${UPLOAD.maxBytes / 1024 / 1024} MB.`,
     );
   }
 
@@ -116,8 +116,8 @@ export async function createUploadTicket(input: {
 
   if (signError || !signed) {
     throw new UploadError(
-      `Storage rejected the upload: ${signError?.message ?? "unknown error"}. ` +
-        `Does the "${UPLOAD.bucket}" bucket exist?`,
+      `El almacenamiento rechazó la carga: ${signError?.message ?? "unknown error"}. ` +
+        `¿Existe el bucket "${UPLOAD.bucket}"?`,
       502,
     );
   }
@@ -134,7 +134,7 @@ export async function createUploadTicket(input: {
 
   if (insertError) {
     await supabase.storage.from(UPLOAD.bucket).remove([storagePath]);
-    throw new UploadError(`Could not record the document: ${insertError.message}`, 500);
+    throw new UploadError(`No se pudo registrar el documento: ${insertError.message}`, 500);
   }
 
   return { documentId, storagePath, token: signed.token };
@@ -161,15 +161,15 @@ export async function finalizeUpload(input: {
         ? { processing_status: "PENDING", processing_error: null }
         : {
             processing_status: "FAILED",
-            processing_error: input.errorMessage ?? "The upload did not complete.",
+            processing_error: input.errorMessage ?? "La carga no se completó.",
           },
     )
     .eq("id", input.documentId)
     .select("id, processing_status")
     .maybeSingle();
 
-  if (error) throw new UploadError(`Could not update the document: ${error.message}`, 500);
-  if (!data) throw new UploadError("Document not found.", 404);
+  if (error) throw new UploadError(`No se pudo actualizar el documento: ${error.message}`, 500);
+  if (!data) throw new UploadError("Documento no encontrado.", 404);
 
   return data;
 }
@@ -184,15 +184,15 @@ export async function createDocumentViewUrl(documentId: string) {
     .eq("id", documentId)
     .maybeSingle();
 
-  if (error) throw new UploadError(`Could not load the document: ${error.message}`, 500);
-  if (!document) throw new UploadError("Document not found.", 404);
+  if (error) throw new UploadError(`No se pudo cargar el documento: ${error.message}`, 500);
+  if (!document) throw new UploadError("Documento no encontrado.", 404);
 
   const { data: signed, error: signError } = await supabase.storage
     .from(UPLOAD.bucket)
     .createSignedUrl(document.storage_path, 60);
 
   if (signError || !signed) {
-    throw new UploadError(`Could not create a link: ${signError?.message ?? "unknown"}`, 502);
+    throw new UploadError(`No se pudo generar el enlace: ${signError?.message ?? "unknown"}`, 502);
   }
 
   return signed.signedUrl;
@@ -286,8 +286,8 @@ export async function processDocument(documentId: string): Promise<ProcessedDocu
     .eq("id", documentId)
     .maybeSingle();
 
-  if (error) throw new UploadError(`Could not load the document: ${error.message}`, 500);
-  if (!document) throw new UploadError("Document not found.", 404);
+  if (error) throw new UploadError(`No se pudo cargar el documento: ${error.message}`, 500);
+  if (!document) throw new UploadError("Documento no encontrado.", 404);
 
   await supabase
     .from("documents")
@@ -301,7 +301,7 @@ export async function processDocument(documentId: string): Promise<ProcessedDocu
 
     if (downloadError || !file) {
       throw new Error(
-        `Could not download the PDF from storage: ${downloadError?.message ?? "unknown error"}`,
+        `No se pudo descargar el PDF del almacenamiento: ${downloadError?.message ?? "unknown error"}`,
       );
     }
 
@@ -313,7 +313,7 @@ export async function processDocument(documentId: string): Promise<ProcessedDocu
     // nothing to attach the analysis to.
     if (!report.full_name) {
       throw new Error(
-        'No "Nombre:" line was found, so the report cannot be matched to a person.',
+        'No se encontró la línea "Nombre:", por lo que el informe no puede asociarse a una persona.',
       );
     }
 
@@ -338,8 +338,8 @@ export async function processDocument(documentId: string): Promise<ProcessedDocu
       p_attitudes: attitudes,
     });
 
-    if (rpcError) throw new Error(`Could not save the analysis: ${rpcError.message}`);
-    if (!applied) throw new Error("The analysis returned no profile.");
+    if (rpcError) throw new Error(`No se pudo guardar el análisis: ${rpcError.message}`);
+    if (!applied) throw new Error("El análisis no devolvió ningún perfil.");
 
     // apply_document_analysis marks the document COMPLETED inside the same
     // transaction as the writes above, so there is nothing to update here.
@@ -356,7 +356,7 @@ export async function processDocument(documentId: string): Promise<ProcessedDocu
       report,
     };
   } catch (cause) {
-    const message = cause instanceof Error ? cause.message : "Processing failed.";
+    const message = cause instanceof Error ? cause.message : "Error al procesar el documento.";
 
     // Record why before rethrowing, so a failed document is diagnosable in the UI
     // rather than left stuck in PROCESSING. Never marked COMPLETED.

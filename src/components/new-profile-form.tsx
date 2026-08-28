@@ -13,28 +13,28 @@ export function NewProfileForm() {
 
   return (
     <form action={formAction} className="space-y-5 rounded-lg border border-slate-200 bg-white p-6">
-      <Field name="full_name" label="Full name" required />
+      <Field name="full_name" label="Nombre completo" required />
 
       <div className="grid gap-5 sm:grid-cols-2">
-        <Field name="email" label="Email" type="email" />
-        <Field name="phone" label="Phone" />
-        <Field name="position" label="Position" />
-        <Field name="department" label="Department" />
-        <Field name="education" label="Education" />
-        <Field name="experience_years" label="Years of experience" inputMode="numeric" />
+        <Field name="email" label="Correo electrónico" type="email" />
+        <Field name="phone" label="Teléfono" />
+        <Field name="position" label="Cargo" />
+        <Field name="department" label="Departamento" />
+        <Field name="education" label="Formación" />
+        <Field name="experience_years" label="Años de experiencia" inputMode="numeric" />
       </div>
 
-      <Field name="summary" label="Summary" multiline />
+      <Field name="summary" label="Resumen" multiline />
 
       <Field
         name="capabilities"
-        label="Capabilities"
-        hint="Comma separated, e.g. React, SQL, Design Systems"
+        label="Competencias"
+        hint="Separadas por comas, p. ej. React, SQL, Sistemas de Diseño"
       />
       <Field
         name="attitudes"
-        label="Attitudes"
-        hint="Comma separated, e.g. Ownership, Collaboration"
+        label="Actitudes"
+        hint="Separadas por comas, p. ej. Responsabilidad, Colaboración"
       />
 
       {state.error ? (
@@ -44,7 +44,7 @@ export function NewProfileForm() {
       <div className="flex items-center gap-3">
         <SubmitButton />
         <Link href="/profiles" className="text-sm text-slate-600 hover:text-slate-900">
-          Cancel
+          Cancelar
         </Link>
       </div>
     </form>
@@ -59,7 +59,7 @@ function SubmitButton() {
       disabled={pending}
       className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
     >
-      {pending ? "Saving…" : "Create profile"}
+      {pending ? "Guardando…" : "Crear perfil"}
     </button>
   );
 }

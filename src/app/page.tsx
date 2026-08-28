@@ -15,21 +15,21 @@ export default async function DashboardPage() {
   ]);
 
   const stats = [
-    { label: "Profiles", value: profiles.length },
-    { label: "Documents", value: documentStats.total },
+    { label: "Perfiles", value: profiles.length },
+    { label: "Documentos", value: documentStats.total },
     {
-      label: "Awaiting processing",
+      label: "Pendientes de procesar",
       value: documentStats.counts.UPLOADING + documentStats.counts.PENDING,
     },
-    { label: "Failed uploads", value: documentStats.counts.FAILED },
+    { label: "Cargas con error", value: documentStats.counts.FAILED },
   ];
 
   return (
     <>
       <PageHeader
-        title="Dashboard"
-        description="Everything currently in the system."
-        action={<ButtonLink href="/upload">Upload PDFs</ButtonLink>}
+        title="Panel"
+        description="Todo lo que hay actualmente en el sistema."
+        action={<ButtonLink href="/upload">Cargar PDF</ButtonLink>}
       />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -44,14 +44,14 @@ export default async function DashboardPage() {
       <div className="mt-8 grid gap-6 lg:grid-cols-2">
         <section>
           <div className="mb-3 flex items-baseline justify-between">
-            <h2 className="text-lg font-semibold">Recent profiles</h2>
+            <h2 className="text-lg font-semibold">Perfiles recientes</h2>
             <Link href="/profiles" className="text-sm text-slate-600 hover:text-slate-900">
-              View all
+              Ver todos
             </Link>
           </div>
           {profiles.length === 0 ? (
             <EmptyState>
-              No profiles yet. <Link href="/profiles/new" className="underline">Add the first one</Link>.
+              Aún no hay perfiles. <Link href="/profiles/new" className="underline">Añada el primero</Link>.
             </EmptyState>
           ) : (
             <Card className="divide-y divide-slate-100 p-0">
@@ -64,7 +64,7 @@ export default async function DashboardPage() {
                   <div>
                     <p className="font-medium">{profile.full_name}</p>
                     <p className="text-sm text-slate-500">
-                      {profile.position ?? "No position recorded"}
+                      {profile.position ?? "Sin cargo registrado"}
                     </p>
                   </div>
                   <span className="text-xs text-slate-400">{formatDate(profile.created_at)}</span>
@@ -75,10 +75,10 @@ export default async function DashboardPage() {
         </section>
 
         <section>
-          <h2 className="mb-3 text-lg font-semibold">Recent documents</h2>
+          <h2 className="mb-3 text-lg font-semibold">Documentos recientes</h2>
           {documents.length === 0 ? (
             <EmptyState>
-              No PDFs uploaded yet. <Link href="/upload" className="underline">Upload some</Link>.
+              Aún no se ha cargado ningún PDF. <Link href="/upload" className="underline">Cargue alguno</Link>.
             </EmptyState>
           ) : (
             <Card className="divide-y divide-slate-100 p-0">
@@ -87,7 +87,7 @@ export default async function DashboardPage() {
                   <div className="min-w-0">
                     <p className="truncate font-medium">{document.file_name}</p>
                     <p className="text-sm text-slate-500">
-                      {document.profile ? document.profile.full_name : "Unassigned"}
+                      {document.profile ? document.profile.full_name : "Sin asignar"}
                     </p>
                   </div>
                   <StatusBadge status={document.processing_status} />

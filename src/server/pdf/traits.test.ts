@@ -4,6 +4,8 @@ import {
   ATTITUDE_VOCABULARY,
   COMPETENCY_VOCABULARY,
   extractTraits,
+  traitLabelEs,
+  TRAIT_LABELS_ES,
 } from "./traits";
 
 const codes = (traits: { code: string }[]) => traits.map((t) => t.code);
@@ -84,3 +86,27 @@ describe("extractTraits", () => {
     expect(attitudes).toEqual([]);
   });
 });
+
+describe("Spanish trait labels", () => {
+  it("labels every vocabulary code in Spanish", () => {
+    for (const entry of [...COMPETENCY_VOCABULARY, ...ATTITUDE_VOCABULARY]) {
+      expect(TRAIT_LABELS_ES[entry.code]).toBe(entry.label);
+      // No English left over: every label carries Spanish orthography or is a
+      // word spelled identically in both languages, never a phrase like
+      // "Decision Making".
+      expect(entry.label).not.toMatch(/^(Leadership|Communication|Decision Making|Teamwork)$/);
+    }
+  });
+
+  it("resolves a stored English label to Spanish by its code", () => {
+    expect(traitLabelEs("teamwork", "Teamwork")).toBe("Trabajo en equipo");
+    expect(traitLabelEs("decision-making", "Decision Making")).toBe("Toma de decisiones");
+    expect(traitLabelEs("collaboration", "Collaboration")).toBe("Colaboración");
+  });
+
+  it("keeps a stored label when the code is unknown — proper nouns and hand-entered traits", () => {
+    expect(traitLabelEs("react", "React")).toBe("React");
+    expect(traitLabelEs("sql", "SQL")).toBe("SQL");
+    expect(traitLabelEs("kubernetes-ops", "Kubernetes Ops")).toBe("Kubernetes Ops");
+  });
+})

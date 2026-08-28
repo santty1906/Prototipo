@@ -4,6 +4,7 @@ import { DiscCardSummary } from "@/components/disc-profile";
 import { ProfileActions } from "@/components/profile-actions";
 import { ProfileFilters } from "@/components/profile-filters";
 import { ButtonLink, Chip, EmptyState, PageHeader } from "@/components/ui";
+import { isDiscCombination, type DiscCombination } from "@/server/pdf/disc";
 import { listProfiles, listTraitOptions } from "@/server/profiles";
 
 export const dynamic = "force-dynamic";
@@ -14,12 +15,26 @@ function toArray(value: string | string[] | undefined) {
   return Array.isArray(value) ? value : [value];
 }
 
+/**
+ * `?disc=DI&disc=CS`, keeping only the twelve real combinations.
+ *
+ * The query string is user input, so an unknown value is dropped rather than
+ * carried into the filter — an invented code would otherwise silently match
+ * nobody and look like an empty result.
+ */
+function toDiscCombinations(value: string | string[] | undefined): DiscCombination[] {
+  return toArray(value)
+    .map((entry) => entry.toUpperCase())
+    .filter(isDiscCombination);
+}
+
 export default async function ProfilesPage({ searchParams }: PageProps<"/profiles">) {
   const params = await searchParams;
   const selected = {
     q: typeof params.q === "string" ? params.q : "",
     capabilities: toArray(params.capability),
     attitudes: toArray(params.attitude),
+    disc: toDiscCombinations(params.disc),
   };
 
   const [profiles, options] = await Promise.all([
@@ -30,9 +45,13 @@ export default async function ProfilesPage({ searchParams }: PageProps<"/profile
   return (
     <>
       <PageHeader
-        title="Profiles"
-        description={`${profiles.length} ${profiles.length === 1 ? "profile" : "profiles"} matching.`}
-        action={<ButtonLink href="/profiles/new">New profile</ButtonLink>}
+        title="Perfiles"
+        description={
+          profiles.length === 1
+            ? "1 perfil coincide con los filtros."
+            : `${profiles.length} perfiles coinciden con los filtros.`
+        }
+        action={<ButtonLink href="/profiles/new">Nuevo perfil</ButtonLink>}
       />
 
       {params.deleted ? (
@@ -50,7 +69,7 @@ export default async function ProfilesPage({ searchParams }: PageProps<"/profile
 
         <div className="space-y-3">
           {profiles.length === 0 ? (
-            <EmptyState>No profiles match these filters.</EmptyState>
+            <EmptyState>Ningún perfil coincide con estos filtros.</EmptyState>
           ) : (
             profiles.map((profile) => (
               // Not one big <Link> any more: the actions menu is a button, and a

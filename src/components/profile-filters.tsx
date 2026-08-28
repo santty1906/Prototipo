@@ -3,9 +3,19 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 
+import {
+  combinationLabelEs,
+  DISC_COMBINATIONS,
+  type DiscCombination,
+} from "@/server/pdf/disc";
 import type { TraitOption } from "@/server/profiles";
 
-type Selected = { q: string; capabilities: string[]; attitudes: string[] };
+type Selected = {
+  q: string;
+  capabilities: string[];
+  attitudes: string[];
+  disc: DiscCombination[];
+};
 
 /**
  * Search + filter controls.
@@ -51,6 +61,7 @@ export function ProfileFilters({
       if (next.q.trim()) params.set("q", next.q.trim());
       for (const code of next.capabilities) params.append("capability", code);
       for (const code of next.attitudes) params.append("attitude", code);
+      for (const combination of next.disc) params.append("disc", combination);
       const search = params.toString();
       startTransition(() => router.push(search ? `/profiles?${search}` : "/profiles"));
     },
@@ -64,10 +75,23 @@ export function ProfileFilters({
     if (query === selected.q) return;
     debounce.current = setTimeout(() => {
       debounce.current = null;
-      push({ q: query, capabilities: selected.capabilities, attitudes: selected.attitudes });
+      push({
+        q: query,
+        capabilities: selected.capabilities,
+        attitudes: selected.attitudes,
+        disc: selected.disc,
+      });
     }, 250);
     return cancelDebounce;
-  }, [query, selected.q, selected.capabilities, selected.attitudes, push, cancelDebounce]);
+  }, [
+    query,
+    selected.q,
+    selected.capabilities,
+    selected.attitudes,
+    selected.disc,
+    push,
+    cancelDebounce,
+  ]);
 
   function toggle(kind: "capabilities" | "attitudes", code: string) {
     const current = selected[kind];
@@ -79,8 +103,19 @@ export function ProfileFilters({
     push({ ...selected, q: query, [kind]: next });
   }
 
+  /** Multi-select with OR semantics: picking DI and DC shows both groups. */
+  function toggleDisc(combination: DiscCombination) {
+    const next = selected.disc.includes(combination)
+      ? selected.disc.filter((value) => value !== combination)
+      : [...selected.disc, combination];
+    push({ ...selected, q: query, disc: next });
+  }
+
   const hasFilters =
-    selected.q !== "" || selected.capabilities.length > 0 || selected.attitudes.length > 0;
+    selected.q !== "" ||
+    selected.capabilities.length > 0 ||
+    selected.attitudes.length > 0 ||
+    selected.disc.length > 0;
 
   return (
     <aside
@@ -90,27 +125,29 @@ export function ProfileFilters({
     >
       <div>
         <label htmlFor="profile-search" className="mb-1.5 block text-sm font-medium">
-          Search by name
+          Buscar por nombre
         </label>
         <input
           id="profile-search"
           type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="e.g. Ana"
+          placeholder="p. ej. Ana"
           className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
         />
       </div>
 
+      <DiscGroup selected={selected.disc} onToggle={toggleDisc} />
+
       <TraitGroup
-        title="Capabilities"
+        title="Competencias"
         options={capabilityOptions}
         selected={selected.capabilities}
         onToggle={(code) => toggle("capabilities", code)}
       />
 
       <TraitGroup
-        title="Attitudes"
+        title="Actitudes"
         options={attitudeOptions}
         selected={selected.attitudes}
         onToggle={(code) => toggle("attitudes", code)}
@@ -121,14 +158,58 @@ export function ProfileFilters({
           type="button"
           onClick={() => {
             setQuery("");
-            push({ q: "", capabilities: [], attitudes: [] });
+            push({ q: "", capabilities: [], attitudes: [], disc: [] });
           }}
           className="text-sm text-slate-600 underline hover:text-slate-900"
         >
-          Clear all filters
+          Borrar todos los filtros
         </button>
       ) : null}
     </aside>
+  );
+}
+
+/**
+ * The twelve ordered DISC combinations.
+ *
+ * Two columns of short codes rather than one long list: the codes are two
+ * characters wide, so a single column would be mostly empty space. The Spanish
+ * dimension names sit underneath each code so the letters are readable by
+ * someone who does not know DISC by heart.
+ */
+function DiscGroup({
+  selected,
+  onToggle,
+}: {
+  selected: DiscCombination[];
+  onToggle: (combination: DiscCombination) => void;
+}) {
+  return (
+    <fieldset>
+      <legend className="mb-2 text-sm font-medium">Clasificación DISC</legend>
+      <p className="mb-2 text-xs leading-relaxed text-slate-500">
+        La primera letra es la dimensión con la puntuación más alta y la segunda, la siguiente.
+        El orden importa: DI y ID no son la misma clasificación.
+      </p>
+      <div className="grid max-h-56 grid-cols-2 gap-x-3 gap-y-1.5 overflow-y-auto pr-1">
+        {DISC_COMBINATIONS.map((combination) => (
+          <label key={combination} className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={selected.includes(combination)}
+              onChange={() => onToggle(combination)}
+              className="mt-0.5 size-4 shrink-0 rounded border-slate-300"
+            />
+            <span className="min-w-0">
+              <span className="font-semibold">{combination}</span>
+              <span className="block truncate text-xs text-slate-500">
+                {combinationLabelEs(combination)}
+              </span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 
@@ -147,7 +228,7 @@ function TraitGroup({
     <fieldset>
       <legend className="mb-2 text-sm font-medium">{title}</legend>
       {options.length === 0 ? (
-        <p className="text-sm text-slate-500">None recorded yet.</p>
+        <p className="text-sm text-slate-500">Todavía no hay ninguna registrada.</p>
       ) : (
         <div className="max-h-56 space-y-1.5 overflow-y-auto pr-1">
           {options.map((option) => (

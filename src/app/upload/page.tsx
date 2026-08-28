@@ -14,17 +14,17 @@ export default async function UploadPage() {
   return (
     <>
       <PageHeader
-        title="Upload documents"
-        description="PDFs are stored in a private bucket. Only the metadata is shown here."
+        title="Cargar documentos"
+        description="Los PDF se guardan en un bucket privado. Aquí solo se muestran los metadatos."
       />
 
       <div className="grid gap-8 lg:grid-cols-[1fr_1fr]">
         <UploadForm profiles={profiles.map((p) => ({ id: p.id, full_name: p.full_name }))} />
 
         <section>
-          <h2 className="mb-3 text-lg font-semibold">Recent uploads</h2>
+          <h2 className="mb-3 text-lg font-semibold">Cargas recientes</h2>
           {documents.length === 0 ? (
-            <EmptyState>Nothing uploaded yet.</EmptyState>
+            <EmptyState>Aún no se ha cargado nada.</EmptyState>
           ) : (
             <Card className="divide-y divide-slate-100 p-0">
               {documents.map((document) => (
@@ -43,7 +43,7 @@ export default async function UploadPage() {
                           {document.profile.full_name}
                         </Link>
                       ) : (
-                        "Unassigned"
+                        "Sin asignar"
                       )}
                     </span>
                     <span>{formatBytes(document.file_size)}</span>

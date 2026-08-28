@@ -19,6 +19,44 @@ import type { FactorScores } from "./competences-report";
 
 export type DiscLetter = "D" | "I" | "S" | "C";
 
+/**
+ * The twelve ordered two-letter combinations.
+ *
+ * Order matters and is part of the classification: "DI" (D highest, I second)
+ * is a different classification from "ID" (I highest, D second). The twelve are
+ * simply every ordered pair of two distinct letters — a profile can never be
+ * "DD", because the primary and secondary factor are always different factors.
+ *
+ * Listed primary-pair-first (DI/ID, DC/CD, …) so the filter reads as a set of
+ * mirrored pairs rather than an alphabetical jumble.
+ */
+export const DISC_COMBINATIONS = [
+  "DI",
+  "ID",
+  "DC",
+  "CD",
+  "DS",
+  "SD",
+  "IC",
+  "CI",
+  "IS",
+  "SI",
+  "SC",
+  "CS",
+] as const;
+
+export type DiscCombination = (typeof DISC_COMBINATIONS)[number];
+
+/**
+ * Narrows an untrusted string — a query parameter — to a known combination.
+ *
+ * The filter is driven by the URL, so anything can arrive here. Unknown values
+ * are dropped rather than passed to the database.
+ */
+export function isDiscCombination(value: string): value is DiscCombination {
+  return (DISC_COMBINATIONS as readonly string[]).includes(value);
+}
+
 export type DiscFactor = {
   letter: DiscLetter;
   /** English label, used in code and in the AI context. */
@@ -34,8 +72,8 @@ export type DiscProfile = {
   ranked: DiscFactor[];
   primary: DiscFactor;
   secondary: DiscFactor;
-  /** Primary + secondary letters, e.g. "DC". */
-  combination: string;
+  /** Primary + secondary letters, e.g. "DC". Order is significant: "DC" ≠ "CD". */
+  combination: DiscCombination;
   /** e.g. "Dominance / Control". */
   combinationName: string;
   /** e.g. "Dominancia / Control". */
@@ -80,10 +118,28 @@ export function classifyDisc(scores: FactorScores): DiscProfile {
     ranked,
     primary,
     secondary,
-    combination: `${primary.letter}${secondary.letter}`,
+    // Always two distinct letters, so always one of DISC_COMBINATIONS.
+    combination: `${primary.letter}${secondary.letter}` as DiscCombination,
     combinationName: `${primary.name} / ${secondary.name}`,
     combinationNameEs: `${primary.labelEs} / ${secondary.labelEs}`,
   };
+}
+
+/**
+ * The combination for one graph's scores, and nothing else.
+ *
+ * The filter's single source of truth: it derives the classification from the
+ * stored scores on every call, exactly as the profile page does. No value is
+ * cached, stored in a column, or attached to a candidate by hand.
+ */
+export function discCombinationOf(scores: FactorScores): DiscCombination {
+  return classifyDisc(scores).combination;
+}
+
+/** e.g. "DC" → "Dominancia / Control". Used to label the filter options. */
+export function combinationLabelEs(combination: DiscCombination): string {
+  const [primary, secondary] = [...combination] as DiscLetter[];
+  return `${FACTOR_META[primary].labelEs} / ${FACTOR_META[secondary].labelEs}`;
 }
 
 /** True when the primary and secondary scores are equal, so the ordering was decided by tie-break. */
@@ -147,6 +203,20 @@ export const DISC_DIMENSIONS: Record<DiscLetter, { labelEs: string; descriptionE
     descriptionEs: "Cómo responde a reglas, procedimientos, precisión y atención al detalle.",
   },
 };
+
+/**
+ * The reading key for the two-letter classification.
+ *
+ * Shown everywhere the combination is displayed, so the letters are never left
+ * to be guessed at. Describes what the letters are, and claims nothing further.
+ */
+export const DISC_COMBINATION_NOTE_ES =
+  "Las dos letras representan las dimensiones DISC predominantes del perfil: " +
+  "la primera es la puntuación más alta y la segunda, la siguiente.";
+
+/** Shown alongside a tied classification, so the order is not read as a finding. */
+export const DISC_TIE_NOTE_ES =
+  "Las dos puntuaciones más altas coinciden, por lo que el orden de las letras es indicativo.";
 
 /**
  * One short clause per factor, used to compose a combination description.

@@ -1,9 +1,9 @@
 import Link from "next/link";
 
 const links = [
-  { href: "/", label: "Dashboard" },
-  { href: "/profiles", label: "Profiles" },
-  { href: "/upload", label: "Upload" },
+  { href: "/", label: "Panel" },
+  { href: "/profiles", label: "Perfiles" },
+  { href: "/upload", label: "Cargar" },
 ];
 
 export function Nav() {
@@ -11,7 +11,7 @@ export function Nav() {
     <header className="border-b border-slate-200 bg-white">
       <div className="mx-auto flex w-full max-w-6xl items-center gap-8 px-6 py-4">
         <Link href="/" className="font-semibold tracking-tight">
-          Talent Profile System
+          Sistema de Perfiles de Talento
         </Link>
         <nav className="flex items-center gap-5 text-sm text-slate-600">
           {links.map((link) => (

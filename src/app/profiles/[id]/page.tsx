@@ -27,27 +27,28 @@ export default async function ProfilePage({ params }: PageProps<"/profiles/[id]"
     : null;
 
   const facts = [
-    { label: "Email", value: profile.email },
-    { label: "Phone", value: profile.phone },
-    { label: "Position", value: profile.position },
-    { label: "Department", value: profile.department },
-    { label: "Education", value: profile.education },
+    { label: "Correo electrónico", value: profile.email },
+    { label: "Teléfono", value: profile.phone },
+    { label: "Cargo", value: profile.position },
+    { label: "Departamento", value: profile.department },
+    { label: "Formación", value: profile.education },
     {
-      label: "Experience",
-      value: profile.experience_years === null ? null : `${profile.experience_years} years`,
+      label: "Experiencia",
+      value:
+        profile.experience_years === null ? null : `${profile.experience_years} años`,
     },
   ];
 
   return (
     <>
       <Link href="/profiles" className="text-sm text-slate-600 hover:text-slate-900">
-        ← Back to profiles
+        ← Volver a perfiles
       </Link>
 
       <div className="mt-4">
         <PageHeader
           title={profile.full_name}
-          description={`Added ${formatDate(profile.created_at)}`}
+          description={`Añadido el ${formatDate(profile.created_at)}`}
           action={
             <ProfileActions
               showView={false}
@@ -99,15 +100,15 @@ export default async function ProfilePage({ params }: PageProps<"/profiles/[id]"
 
           {profile.summary ? (
             <Card>
-              <h2 className="mb-2 text-sm font-medium text-slate-600">Summary</h2>
+              <h2 className="mb-2 text-sm font-medium text-slate-600">Resumen</h2>
               <p className="text-sm leading-relaxed">{profile.summary}</p>
             </Card>
           ) : null}
 
           <Card>
-            <h2 className="mb-3 text-sm font-medium text-slate-600">Capabilities</h2>
+            <h2 className="mb-3 text-sm font-medium text-slate-600">Competencias</h2>
             {profile.capabilities.length === 0 ? (
-              <p className="text-sm text-slate-500">None recorded.</p>
+              <p className="text-sm text-slate-500">Sin registrar.</p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
                 {profile.capabilities.map((trait) => (
@@ -116,9 +117,9 @@ export default async function ProfilePage({ params }: PageProps<"/profiles/[id]"
               </div>
             )}
 
-            <h2 className="mt-5 mb-3 text-sm font-medium text-slate-600">Attitudes</h2>
+            <h2 className="mt-5 mb-3 text-sm font-medium text-slate-600">Actitudes</h2>
             {profile.attitudes.length === 0 ? (
-              <p className="text-sm text-slate-500">None recorded.</p>
+              <p className="text-sm text-slate-500">Sin registrar.</p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
                 {profile.attitudes.map((trait) => (
@@ -130,17 +131,17 @@ export default async function ProfilePage({ params }: PageProps<"/profiles/[id]"
 
           <section>
             <div className="mb-3 flex items-baseline justify-between">
-              <h2 className="text-lg font-semibold">Documents</h2>
+              <h2 className="text-lg font-semibold">Documentos</h2>
               <Link
                 href={`/upload?profileId=${profile.id}`}
                 className="text-sm text-slate-600 hover:text-slate-900"
               >
-                Upload PDFs
+                Cargar PDF
               </Link>
             </div>
 
             {profile.documents.length === 0 ? (
-              <EmptyState>No documents for this profile yet.</EmptyState>
+              <EmptyState>Este perfil todavía no tiene documentos.</EmptyState>
             ) : (
               <Card className="divide-y divide-slate-100 p-0">
                 {profile.documents.map((document) => (
@@ -172,7 +173,7 @@ export default async function ProfilePage({ params }: PageProps<"/profiles/[id]"
           />
 
           <Card>
-            <h2 className="mb-3 text-sm font-medium text-slate-600">Details</h2>
+            <h2 className="mb-3 text-sm font-medium text-slate-600">Datos del candidato</h2>
             <dl className="space-y-3 text-sm">
               {facts.map((fact) => (
                 <div key={fact.label}>

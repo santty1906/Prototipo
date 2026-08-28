@@ -67,11 +67,11 @@ const STATUS_STYLES: Record<ProcessingStatus, string> = {
 };
 
 const STATUS_LABELS: Record<ProcessingStatus, string> = {
-  UPLOADING: "Uploading",
-  PENDING: "Awaiting processing",
-  PROCESSING: "Processing",
-  COMPLETED: "Processed",
-  FAILED: "Failed",
+  UPLOADING: "Cargando",
+  PENDING: "Pendiente de procesar",
+  PROCESSING: "Procesando",
+  COMPLETED: "Procesado",
+  FAILED: "Con error",
 };
 
 export function StatusBadge({ status }: { status: ProcessingStatus }) {

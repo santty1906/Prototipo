@@ -3,7 +3,9 @@ import type { FactorScores, GraphScores } from "@/server/pdf/competences-report"
 import {
   classifyDisc,
   describeCombination,
+  DISC_COMBINATION_NOTE_ES,
   DISC_DIMENSIONS,
+  DISC_TIE_NOTE_ES,
   DISC_TRAITS,
   GRAPH_LABELS,
   hasTie,
@@ -86,9 +88,17 @@ export function DiscProfilePanel({ graphs }: { graphs: GraphScores }) {
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-sm font-medium text-slate-600">Estilo DISC predominante</h2>
+            <h2 className="text-sm font-medium text-slate-600">Clasificación DISC</h2>
             <p className="mt-1 text-3xl font-semibold tracking-tight">{disc.combination}</p>
             <p className="text-slate-600">{disc.combinationNameEs}</p>
+            <p className="mt-1.5 max-w-md text-xs leading-relaxed text-slate-500">
+              {DISC_COMBINATION_NOTE_ES}
+            </p>
+            {tied ? (
+              <p className="mt-1.5 max-w-md rounded-md bg-amber-50 px-2.5 py-1.5 text-xs leading-relaxed text-amber-900">
+                {DISC_TIE_NOTE_ES}
+              </p>
+            ) : null}
           </div>
           <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
             Gráfica 1 — {GRAPH_LABELS[1].es}
@@ -251,10 +261,10 @@ function TraitList({
 }
 
 /**
- * Compact DISC summary for a list card: the combination and the top two scores.
+ * Compact DISC summary for a list card: the classification and all four scores.
  *
- * Deliberately not the full assessment — enough to compare candidates at a
- * glance without opening each one.
+ * Shows every dimension, not just the top two, so a card can be read on its own
+ * — the two letters only mean something next to the numbers they came from.
  */
 export function DiscCardSummary({ graph1 }: { graph1: FactorScores | null }) {
   if (!graph1) {
@@ -263,35 +273,53 @@ export function DiscCardSummary({ graph1 }: { graph1: FactorScores | null }) {
 
   const disc = classifyDisc(graph1);
   const tied = hasTie(disc);
+  const topTwo = [disc.primary.letter, disc.secondary.letter];
 
   return (
     <div>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="text-xs text-slate-500">DISC</span>
+        <span className="text-xs text-slate-500">Clasificación DISC</span>
         <span className="text-lg font-semibold tracking-tight">{disc.combination}</span>
-        <span className="text-sm text-slate-600">
-          {tied
-            ? `Empate entre ${disc.primary.letter} e ${disc.secondary.letter}`
-            : `Perfil predominante: ${disc.combinationNameEs}`}
-        </span>
+        <span className="text-sm text-slate-600">{disc.combinationNameEs}</span>
       </div>
 
       <div className="mt-2 max-w-sm space-y-1.5">
-        {disc.ranked.slice(0, 2).map((factor) => (
-          <div key={factor.letter} className="flex items-center gap-2">
-            <span className="w-4 shrink-0 text-xs font-semibold">{factor.letter}</span>
-            <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-100">
+        {(["D", "I", "S", "C"] as DiscLetter[]).map((letter) => {
+          const factor = disc.ranked.find((entry) => entry.letter === letter)!;
+          const emphasised = topTwo.includes(letter);
+
+          return (
+            <div key={letter} className="flex items-center gap-2">
+              <span
+                className={`w-4 shrink-0 text-xs ${emphasised ? "font-semibold" : "text-slate-500"}`}
+              >
+                {letter}
+              </span>
               <div
-                className="h-full rounded-full bg-slate-900"
-                style={{ width: `${factor.score}%` }}
-              />
+                className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-100"
+                role="img"
+                aria-label={`${factor.labelEs}: ${factor.score} sobre 100`}
+              >
+                <div
+                  className={`h-full rounded-full ${emphasised ? "bg-slate-900" : "bg-slate-300"}`}
+                  style={{ width: `${factor.score}%` }}
+                />
+              </div>
+              <span className="w-9 shrink-0 text-right text-xs tabular-nums text-slate-600">
+                {factor.score}%
+              </span>
             </div>
-            <span className="w-9 shrink-0 text-right text-xs tabular-nums text-slate-600">
-              {factor.score}%
-            </span>
-          </div>
-        ))}
+          );
+        })}
       </div>
+
+      <p className="mt-2 text-xs leading-relaxed text-slate-500">{DISC_COMBINATION_NOTE_ES}</p>
+
+      {tied ? (
+        <p className="mt-1.5 rounded-md bg-amber-50 px-2.5 py-1.5 text-xs leading-relaxed text-amber-900">
+          {DISC_TIE_NOTE_ES}
+        </p>
+      ) : null}
     </div>
   );
 }

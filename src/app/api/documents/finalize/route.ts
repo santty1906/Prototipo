@@ -26,7 +26,7 @@ export async function POST(request: Request) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Malformed JSON body." }, { status: 400 });
+    return NextResponse.json({ error: "El cuerpo de la petición no es JSON válido." }, { status: 400 });
   }
 
   const parsed = schema.safeParse(body);
@@ -69,6 +69,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: cause.message }, { status: cause.status });
     }
     console.error("finalize failed", cause);
-    return NextResponse.json({ error: "Could not finish the upload." }, { status: 500 });
+    return NextResponse.json({ error: "No se pudo finalizar la carga." }, { status: 500 });
   }
 }

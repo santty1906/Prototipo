@@ -26,17 +26,17 @@ type VocabularyEntry = Trait & {
 export const COMPETENCY_VOCABULARY: VocabularyEntry[] = [
   {
     code: "leadership",
-    label: "Leadership",
+    label: "Liderazgo",
     terms: ["liderazgo", "lider", "lidera", "dirigir", "dirige", "mando", "autoridad sobre"],
   },
   {
     code: "communication",
-    label: "Communication",
+    label: "Comunicación",
     terms: ["comunicacion", "comunica", "comunicativo", "expresa", "expresarse", "verbal"],
   },
   {
     code: "persuasion",
-    label: "Persuasion",
+    label: "Persuasión",
     terms: [
       "persuasion",
       "persuasivo",
@@ -51,32 +51,32 @@ export const COMPETENCY_VOCABULARY: VocabularyEntry[] = [
   },
   {
     code: "analysis",
-    label: "Analysis",
+    label: "Análisis",
     terms: ["analisis", "analitico", "analitica", "analiza", "analizar", "evalua"],
   },
   {
     code: "decision-making",
-    label: "Decision Making",
+    label: "Toma de decisiones",
     terms: ["decision", "decisiones", "decide", "decidido", "decidir"],
   },
   {
     code: "problem-solving",
-    label: "Problem Solving",
+    label: "Resolución de problemas",
     terms: ["problema", "problemas", "resolucion", "resuelve", "resolver", "soluciona", "solucion"],
   },
   {
     code: "results-orientation",
-    label: "Results Orientation",
+    label: "Orientación a resultados",
     terms: ["resultado", "resultados", "objetivo", "objetivos", "meta", "metas", "logro", "logros"],
   },
   {
     code: "teamwork",
-    label: "Teamwork",
+    label: "Trabajo en equipo",
     terms: ["equipo", "equipos", "colabora", "colaborativo", "cooperar", "grupo"],
   },
   {
     code: "discipline",
-    label: "Discipline",
+    label: "Disciplina",
     terms: ["disciplina", "disciplinado", "riguroso", "rigor", "metodico", "sistematico"],
   },
 ];
@@ -85,10 +85,10 @@ export const COMPETENCY_VOCABULARY: VocabularyEntry[] = [
 export const ATTITUDE_VOCABULARY: VocabularyEntry[] = [
   {
     code: "competitive",
-    label: "Competitive",
+    label: "Competitivo",
     terms: ["competitivo", "competitiva", "competencia", "competir", "reta", "retos"],
   },
-  { code: "optimistic", label: "Optimistic", terms: ["optimista", "optimismo"] },
+  { code: "optimistic", label: "Optimista", terms: ["optimista", "optimismo"] },
   {
     code: "sociable",
     label: "Sociable",
@@ -96,21 +96,21 @@ export const ATTITUDE_VOCABULARY: VocabularyEntry[] = [
   },
   {
     code: "dynamic",
-    label: "Dynamic",
+    label: "Dinámico",
     terms: ["dinamico", "dinamica", "dinamismo", "activo", "energico", "agresivo"],
   },
-  { code: "positive", label: "Positive", terms: ["positivo", "positiva", "positivamente"] },
+  { code: "positive", label: "Positivo", terms: ["positivo", "positiva", "positivamente"] },
   {
     code: "persistent",
-    label: "Persistent",
+    label: "Persistente",
     terms: ["persistente", "persistencia", "constante", "tenaz", "insiste", "perseverancia"],
   },
   {
     code: "direct",
-    label: "Direct",
+    label: "Directo",
     terms: ["directo", "directa", "franco", "franca", "frontal", "sincero"],
   },
-  { code: "disciplined", label: "Disciplined", terms: ["disciplinado", "disciplinada"] },
+  { code: "disciplined", label: "Disciplinado", terms: ["disciplinado", "disciplinada"] },
   {
     code: "adaptable",
     label: "Adaptable",
@@ -118,7 +118,7 @@ export const ATTITUDE_VOCABULARY: VocabularyEntry[] = [
   },
   {
     code: "achievement-oriented",
-    label: "Achievement Oriented",
+    label: "Orientado al logro",
     terms: ["reconocimiento", "ambicion", "ambicioso", "superacion", "destacar", "prestigio"],
   },
 ];
@@ -176,4 +176,43 @@ export function extractTraits(sections: Record<string, string | null>): {
     capabilities: matchVocabulary(haystack, COMPETENCY_VOCABULARY),
     attitudes: matchVocabulary(haystack, ATTITUDE_VOCABULARY),
   };
+}
+
+/**
+ * Spanish display labels, keyed by trait code.
+ *
+ * The two vocabularies above supply the labels written for newly processed
+ * documents, but rows already in the database keep whatever label was stored
+ * when they were written. Resolving by `code` at render time makes those rows
+ * display in Spanish as well, with no migration and no rewrite of stored data.
+ *
+ * Codes not listed here — a proper noun like "React" or "SQL", or a trait typed
+ * in by hand on the new-profile form — keep their stored label untouched.
+ */
+export const TRAIT_LABELS_ES: Record<string, string> = {
+  ...Object.fromEntries(
+    [...COMPETENCY_VOCABULARY, ...ATTITUDE_VOCABULARY].map((entry) => [entry.code, entry.label]),
+  ),
+
+  // Codes that predate the vocabulary or arrived with the sample data.
+  accessibility: "Accesibilidad",
+  adaptability: "Adaptabilidad",
+  analytical: "Analítico",
+  collaboration: "Colaboración",
+  curiosity: "Curiosidad",
+  "data-analysis": "Análisis de datos",
+  "design-systems": "Sistemas de diseño",
+  "detail-oriented": "Atento al detalle",
+  empathy: "Empatía",
+  mentoring: "Mentoría",
+  ownership: "Responsabilidad",
+  "product-strategy": "Estrategia de producto",
+  "stakeholder-management": "Gestión de interesados",
+  "survey-design": "Diseño de encuestas",
+  "user-research": "Investigación de usuarios",
+};
+
+/** The Spanish label for a stored trait, falling back to the label as stored. */
+export function traitLabelEs(code: string, storedLabel: string): string {
+  return TRAIT_LABELS_ES[code] ?? storedLabel;
 }

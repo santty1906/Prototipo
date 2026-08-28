@@ -7,8 +7,8 @@ import { parseTraitList } from "@/lib/format";
 import { createProfile } from "@/server/profiles";
 
 const schema = z.object({
-  full_name: z.string().trim().min(1, "A name is required.").max(200),
-  email: z.string().trim().email("That email address is not valid.").or(z.literal("")),
+  full_name: z.string().trim().min(1, "El nombre es obligatorio.").max(200),
+  email: z.string().trim().email("El correo electrónico no es válido.").or(z.literal("")),
   phone: z.string().trim().max(50),
   position: z.string().trim().max(200),
   department: z.string().trim().max(200),
@@ -16,7 +16,7 @@ const schema = z.object({
   experience_years: z
     .string()
     .trim()
-    .refine((value) => value === "" || /^\d{1,2}$/.test(value), "Years must be a number 0–70."),
+    .refine((value) => value === "" || /^\d{1,2}$/.test(value), "Los años de experiencia deben ser un número entre 0 y 70."),
   summary: z.string().trim().max(2000),
   capabilities: z.string().max(1000),
   attitudes: z.string().max(1000),
@@ -54,7 +54,7 @@ export async function createProfileAction(
       attitudes: parseTraitList(input.attitudes),
     });
   } catch (cause) {
-    return { error: cause instanceof Error ? cause.message : "Could not create the profile." };
+    return { error: cause instanceof Error ? cause.message : "No se pudo crear el perfil." };
   }
 
   // redirect() throws, so it must sit outside the try block above.
