@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 
+import { COMPANIES, type Company } from "@/lib/classification";
 import {
   combinationLabelEs,
   DISC_COMBINATIONS,
@@ -12,6 +13,7 @@ import type { TraitOption } from "@/server/profiles";
 
 type Selected = {
   q: string;
+  companies: Company[];
   capabilities: string[];
   attitudes: string[];
   disc: DiscCombination[];
@@ -59,6 +61,7 @@ export function ProfileFilters({
       cancelDebounce();
       const params = new URLSearchParams();
       if (next.q.trim()) params.set("q", next.q.trim());
+      for (const company of next.companies) params.append("company", company);
       for (const code of next.capabilities) params.append("capability", code);
       for (const code of next.attitudes) params.append("attitude", code);
       for (const combination of next.disc) params.append("disc", combination);
@@ -77,6 +80,7 @@ export function ProfileFilters({
       debounce.current = null;
       push({
         q: query,
+        companies: selected.companies,
         capabilities: selected.capabilities,
         attitudes: selected.attitudes,
         disc: selected.disc,
@@ -86,6 +90,7 @@ export function ProfileFilters({
   }, [
     query,
     selected.q,
+    selected.companies,
     selected.capabilities,
     selected.attitudes,
     selected.disc,
@@ -103,6 +108,14 @@ export function ProfileFilters({
     push({ ...selected, q: query, [kind]: next });
   }
 
+  /** Multi-select with OR semantics: picking CGPAN and CGCR shows both. */
+  function toggleCompany(company: Company) {
+    const next = selected.companies.includes(company)
+      ? selected.companies.filter((value) => value !== company)
+      : [...selected.companies, company];
+    push({ ...selected, q: query, companies: next });
+  }
+
   /** Multi-select with OR semantics: picking DI and DC shows both groups. */
   function toggleDisc(combination: DiscCombination) {
     const next = selected.disc.includes(combination)
@@ -113,6 +126,7 @@ export function ProfileFilters({
 
   const hasFilters =
     selected.q !== "" ||
+    selected.companies.length > 0 ||
     selected.capabilities.length > 0 ||
     selected.attitudes.length > 0 ||
     selected.disc.length > 0;
@@ -137,6 +151,8 @@ export function ProfileFilters({
         />
       </div>
 
+      <CompanyGroup selected={selected.companies} onToggle={toggleCompany} />
+
       <DiscGroup selected={selected.disc} onToggle={toggleDisc} />
 
       <TraitGroup
@@ -158,7 +174,7 @@ export function ProfileFilters({
           type="button"
           onClick={() => {
             setQuery("");
-            push({ q: "", capabilities: [], attitudes: [], disc: [] });
+            push({ q: "", companies: [], capabilities: [], attitudes: [], disc: [] });
           }}
           className="text-sm text-slate-600 underline hover:text-slate-900"
         >
@@ -166,6 +182,40 @@ export function ProfileFilters({
         </button>
       ) : null}
     </aside>
+  );
+}
+
+/**
+ * The companies a profile can be assigned to.
+ *
+ * The same fixed list as the classification form on the detail page — these are
+ * business codes, not values discovered in the data, so an empresa with nobody
+ * assigned to it still appears and simply returns nothing.
+ */
+function CompanyGroup({
+  selected,
+  onToggle,
+}: {
+  selected: Company[];
+  onToggle: (company: Company) => void;
+}) {
+  return (
+    <fieldset>
+      <legend className="mb-2 text-sm font-medium">Empresa</legend>
+      <div className="grid max-h-56 grid-cols-2 gap-x-3 gap-y-1.5 overflow-y-auto pr-1">
+        {COMPANIES.map((company) => (
+          <label key={company} className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={selected.includes(company)}
+              onChange={() => onToggle(company)}
+              className="size-4 shrink-0 rounded border-slate-300"
+            />
+            <span className="min-w-0 truncate">{company}</span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 

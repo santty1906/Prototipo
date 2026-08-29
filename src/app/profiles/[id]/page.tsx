@@ -5,6 +5,7 @@ import { AiConsultant } from "@/components/ai-consultant";
 import { DiscProfilePanel } from "@/components/disc-profile";
 import { DocumentLink } from "@/components/document-link";
 import { ProfileActions } from "@/components/profile-actions";
+import { ProfileClassification } from "@/components/profile-classification";
 import { Card, Chip, EmptyState, PageHeader, StatusBadge } from "@/components/ui";
 import { formatBytes, formatDate } from "@/lib/format";
 import { classifyDisc } from "@/server/pdf/disc";
@@ -170,6 +171,12 @@ export default async function ProfilePage({ params }: PageProps<"/profiles/[id]"
             profileId={profile.id}
             profileName={profile.full_name}
             discSummary={discSummary}
+          />
+
+          <ProfileClassification
+            profileId={profile.id}
+            profileType={profile.profile_type}
+            company={profile.company}
           />
 
           <Card>

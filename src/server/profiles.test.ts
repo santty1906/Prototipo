@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { Company, ProfileType } from "@/lib/classification";
+
 import type { DiscCombination } from "./pdf/disc";
 import type { ProfileFilters } from "./profiles";
 
@@ -31,9 +33,15 @@ function makeBuilder(rows: Row[]) {
   const filters: ((row: Row) => boolean)[] = [];
   let sort: { column: string; ascending: boolean } | null = null;
   let take: number | null = null;
+  let patch: Row | null = null;
 
   const run = () => {
     let result = rows.filter((row) => filters.every((keep) => keep(row)));
+
+    // An UPDATE writes the patch onto the matched rows in place, so a test can
+    // assert afterwards that the columns it did NOT mention still hold their
+    // original values.
+    if (patch) for (const row of result) Object.assign(row, patch);
 
     if (sort) {
       const { column, ascending } = sort;
@@ -49,6 +57,10 @@ function makeBuilder(rows: Row[]) {
 
   const builder = {
     select: () => builder,
+    update: (values: Row) => {
+      patch = values;
+      return builder;
+    },
     in: (column: string, values: unknown[]) => {
       filters.push((row) => values.includes(row[column]));
       return builder;
@@ -74,6 +86,10 @@ function makeBuilder(rows: Row[]) {
     then: (
       resolve: (value: { data: Row[]; error: null }) => unknown,
     ) => resolve({ data: run(), error: null }),
+    maybeSingle: () => ({
+      then: (resolve: (value: { data: Row | null; error: null }) => unknown) =>
+        resolve({ data: run()[0] ?? null, error: null }),
+    }),
   };
 
   return builder;
@@ -119,6 +135,10 @@ type Candidate = {
   scores: Scores | null;
   capabilities?: string[];
   attitudes?: string[];
+  /** Assigned Empresa. Omitted means unassigned — NULL, matching no company filter. */
+  company?: Company;
+  /** Assigned Tipo. Independent of Empresa and of DISC. */
+  profileType?: ProfileType;
 };
 
 /**
@@ -126,11 +146,11 @@ type Candidate = {
  * so "DI" and "Ramírez" can disagree — plus one candidate with no assessment.
  */
 const CANDIDATES: Candidate[] = [
-  { id: "p01", name: "Ana Ramírez", expected: "DI", scores: { dominance: 80, influence: 60, steadiness: 20, control: 10 }, capabilities: ["sql", "react"], attitudes: ["colaboracion"] },
-  { id: "p02", name: "Bruno Ramírez", expected: "ID", scores: { dominance: 60, influence: 80, steadiness: 20, control: 10 }, capabilities: ["sql"] },
-  { id: "p03", name: "Carla Ramírez", expected: "DC", scores: { dominance: 78, influence: 50, steadiness: 18, control: 53 }, capabilities: ["react"] },
-  { id: "p04", name: "Diego Soto", expected: "DI", scores: { dominance: 85, influence: 70, steadiness: 30, control: 15 }, capabilities: ["react"], attitudes: ["colaboracion"] },
-  { id: "p05", name: "Elena Soto", expected: "CD", scores: { dominance: 53, influence: 50, steadiness: 18, control: 78 } },
+  { id: "p01", name: "Ana Ramírez", expected: "DI", scores: { dominance: 80, influence: 60, steadiness: 20, control: 10 }, capabilities: ["sql", "react"], attitudes: ["colaboracion"], company: "CGPAN", profileType: "RECRUITMENT" },
+  { id: "p02", name: "Bruno Ramírez", expected: "ID", scores: { dominance: 60, influence: 80, steadiness: 20, control: 10 }, capabilities: ["sql"], company: "CGCR", profileType: "CURRENT_EMPLOYEE" },
+  { id: "p03", name: "Carla Ramírez", expected: "DC", scores: { dominance: 78, influence: 50, steadiness: 18, control: 53 }, capabilities: ["react"], company: "CGPAN" },
+  { id: "p04", name: "Diego Soto", expected: "DI", scores: { dominance: 85, influence: 70, steadiness: 30, control: 15 }, capabilities: ["react"], attitudes: ["colaboracion"], company: "CGCR" },
+  { id: "p05", name: "Elena Soto", expected: "CD", scores: { dominance: 53, influence: 50, steadiness: 18, control: 78 }, company: "CORPIT/IA" },
   { id: "p06", name: "Fabián Soto", expected: "DS", scores: { dominance: 80, influence: 10, steadiness: 60, control: 20 } },
   { id: "p07", name: "Gabriela Nieto", expected: "SD", scores: { dominance: 60, influence: 10, steadiness: 80, control: 20 } },
   { id: "p08", name: "Hugo Nieto", expected: "IC", scores: { dominance: 10, influence: 80, steadiness: 20, control: 60 } },
@@ -138,9 +158,11 @@ const CANDIDATES: Candidate[] = [
   { id: "p10", name: "Julián Vega", expected: "IS", scores: { dominance: 10, influence: 80, steadiness: 60, control: 20 } },
   { id: "p11", name: "Karla Vega", expected: "SI", scores: { dominance: 10, influence: 60, steadiness: 80, control: 20 } },
   { id: "p12", name: "Luis Vega", expected: "SC", scores: { dominance: 10, influence: 20, steadiness: 80, control: 60 } },
-  { id: "p13", name: "Marta Vega", expected: "CS", scores: { dominance: 10, influence: 20, steadiness: 60, control: 80 }, capabilities: ["sql"] },
+  { id: "p13", name: "Marta Vega", expected: "CS", scores: { dominance: 10, influence: 20, steadiness: 60, control: 80 }, capabilities: ["sql"], company: "CGPAN" },
   // No processed report: has no classification, so no DISC filter can match it.
-  { id: "p14", name: "Nadia Ortiz", expected: "—", scores: null, capabilities: ["sql"] },
+  // No processed report, but a full classification: Tipo/Empresa never depend on
+  // DISC, on an assessment or on a PDF having been uploaded.
+  { id: "p14", name: "Nadia Ortiz", expected: "—", scores: null, capabilities: ["sql"], company: "CGCR", profileType: "RECRUITMENT" },
 ];
 
 function buildDatabase(): Database {
@@ -154,6 +176,10 @@ function buildDatabase(): Database {
       id: candidate.id,
       full_name: candidate.name,
       full_name_normalized: normalize(candidate.name),
+      // Unassigned is NULL, exactly as the migration leaves existing rows.
+      company: candidate.company ?? null,
+      profile_type: candidate.profileType ?? null,
+      position: null,
       // Descending ids give a stable, predictable newest-first order.
       created_at: `2026-01-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
     });
@@ -338,5 +364,184 @@ describe("listProfiles — the existing filters still behave as before", () => {
 
     const unprocessed = await listProfiles({ q: "Nadia" });
     expect(unprocessed[0].graph1).toBeNull();
+  });
+});
+
+describe("listProfiles — Empresa filter", () => {
+  it("returns only the profiles assigned to the selected company", async () => {
+    expect(await namesFor({ companies: ["CGPAN"] })).toEqual([
+      "Ana Ramírez",
+      "Carla Ramírez",
+      "Marta Vega",
+    ]);
+  });
+
+  it("ORs multiple selected companies", async () => {
+    expect(await namesFor({ companies: ["CGPAN", "CGCR"] })).toEqual([
+      "Ana Ramírez",
+      "Bruno Ramírez",
+      "Carla Ramírez",
+      "Diego Soto",
+      "Marta Vega",
+      "Nadia Ortiz",
+    ]);
+  });
+
+  it("matches a company code containing a slash", async () => {
+    expect(await namesFor({ companies: ["CORPIT/IA"] })).toEqual(["Elena Soto"]);
+  });
+
+  it("never returns profiles with no company assigned", async () => {
+    const unassigned = ["Fabián Soto", "Gabriela Nieto", "Hugo Nieto"];
+    for (const company of ["CGPAN", "CGCR", "CORPIT/IA"] as const) {
+      const matched = await namesFor({ companies: [company] });
+      for (const name of unassigned) expect(matched).not.toContain(name);
+    }
+  });
+
+  it("returns an empty list for a company nobody is assigned to", async () => {
+    expect(await namesFor({ companies: ["CORPRRHH"] })).toEqual([]);
+  });
+
+  it("applies no company constraint when the list is empty", async () => {
+    const { listProfiles } = await import("./profiles");
+    expect(await listProfiles({ companies: [] })).toHaveLength(CANDIDATES.length);
+  });
+
+  it("reads Empresa off the stored column, not off DISC or the position", async () => {
+    expect(await namesFor({ companies: ["CGPAN"] })).toContain("Carla Ramírez");
+
+    // Re-assign the stored value only. Nothing about the report changes.
+    const profile = db.profiles.find((row) => row.id === "p03")!;
+    profile.company = "CGVEN";
+
+    expect(await namesFor({ companies: ["CGPAN"] })).not.toContain("Carla Ramírez");
+    expect(await namesFor({ companies: ["CGVEN"] })).toEqual(["Carla Ramírez"]);
+  });
+});
+
+describe("listProfiles — Empresa combined with the existing filters", () => {
+  it("ANDs Empresa against DISC — (CGPAN OR CGCR) AND DI", async () => {
+    expect(await namesFor({ companies: ["CGPAN", "CGCR"], disc: ["DI"] })).toEqual([
+      "Ana Ramírez",
+      "Diego Soto",
+    ]);
+  });
+
+  it("ANDs Empresa against the name search", async () => {
+    expect(await namesFor({ q: "Ramírez", companies: ["CGPAN"] })).toEqual([
+      "Ana Ramírez",
+      "Carla Ramírez",
+    ]);
+    expect(await namesFor({ q: "ramirez", companies: ["CGCR"] })).toEqual(["Bruno Ramírez"]);
+  });
+
+  it("ANDs Empresa against a capability filter", async () => {
+    expect(await namesFor({ companies: ["CGPAN"], capabilities: ["sql"] })).toEqual([
+      "Ana Ramírez",
+      "Marta Vega",
+    ]);
+  });
+
+  it("ANDs Empresa against an attitude filter", async () => {
+    expect(await namesFor({ companies: ["CGCR"], attitudes: ["colaboracion"] })).toEqual([
+      "Diego Soto",
+    ]);
+  });
+
+  it("combines Empresa with name, capability, attitude and DISC all at once", async () => {
+    expect(
+      await namesFor({
+        q: "Ramírez",
+        companies: ["CGPAN", "CGCR"],
+        capabilities: ["sql", "react"],
+        attitudes: ["colaboracion"],
+        disc: ["DI"],
+      }),
+    ).toEqual(["Ana Ramírez"]);
+  });
+
+  it("returns an empty list when Empresa excludes every other match", async () => {
+    expect(await namesFor({ companies: ["CGPAN"], disc: ["ID"] })).toEqual([]);
+    expect(await namesFor({ companies: ["CGCR"], capabilities: ["sql", "react"] })).toEqual([]);
+  });
+
+  it("keeps the DISC filter intact — Empresa does not replace it", async () => {
+    expect(await namesFor({ disc: ["DI"] })).toEqual(["Ana Ramírez", "Diego Soto"]);
+  });
+});
+
+describe("getProfile — stored classification", () => {
+  it("loads the saved Tipo and Empresa", async () => {
+    const { getProfile } = await import("./profiles");
+    const profile = await getProfile("p01");
+
+    expect(profile?.company).toBe("CGPAN");
+    expect(profile?.profile_type).toBe("RECRUITMENT");
+  });
+
+  it("reports an unassigned classification as null rather than inventing one", async () => {
+    const { getProfile } = await import("./profiles");
+    const profile = await getProfile("p06");
+
+    expect(profile?.company).toBeNull();
+    expect(profile?.profile_type).toBeNull();
+  });
+
+  it("loads the classification of a profile that has no assessment at all", async () => {
+    const { getProfile } = await import("./profiles");
+    const profile = await getProfile("p14");
+
+    expect(profile?.assessment).toBeNull();
+    expect(profile?.company).toBe("CGCR");
+    expect(profile?.profile_type).toBe("RECRUITMENT");
+  });
+});
+
+describe("updateProfileClassification", () => {
+  it("stores Tipo and Empresa on the profile", async () => {
+    const { updateProfileClassification } = await import("./profiles");
+    await updateProfileClassification("p06", {
+      profile_type: "CURRENT_EMPLOYEE",
+      company: "CORPRRHH",
+    });
+
+    const profile = db.profiles.find((row) => row.id === "p06")!;
+    expect(profile.company).toBe("CORPRRHH");
+    expect(profile.profile_type).toBe("CURRENT_EMPLOYEE");
+    expect(await namesFor({ companies: ["CORPRRHH"] })).toEqual(["Fabián Soto"]);
+  });
+
+  it("leaves every other column on the row untouched", async () => {
+    const { updateProfileClassification } = await import("./profiles");
+    const before = { ...db.profiles.find((row) => row.id === "p01")! };
+
+    await updateProfileClassification("p01", {
+      profile_type: "CURRENT_EMPLOYEE",
+      company: "ECAR",
+    });
+
+    const after = db.profiles.find((row) => row.id === "p01")!;
+    expect(after.full_name).toBe(before.full_name);
+    expect(after.full_name_normalized).toBe(before.full_name_normalized);
+    expect(after.created_at).toBe(before.created_at);
+    expect(after.position).toBe(before.position);
+  });
+
+  it("clears an assignment back to null", async () => {
+    const { updateProfileClassification } = await import("./profiles");
+    await updateProfileClassification("p01", { profile_type: null, company: null });
+
+    const profile = db.profiles.find((row) => row.id === "p01")!;
+    expect(profile.company).toBeNull();
+    expect(profile.profile_type).toBeNull();
+    expect(await namesFor({ companies: ["CGPAN"] })).toEqual(["Carla Ramírez", "Marta Vega"]);
+  });
+
+  it("rejects an id that matches no candidate", async () => {
+    const { updateProfileClassification } = await import("./profiles");
+    await expect(
+      updateProfileClassification("p99", { profile_type: null, company: "CGPAN" }),
+    ).rejects.toThrow("Candidato no encontrado.");
   });
 });

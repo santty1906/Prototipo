@@ -4,6 +4,12 @@ import { DiscCardSummary } from "@/components/disc-profile";
 import { ProfileActions } from "@/components/profile-actions";
 import { ProfileFilters } from "@/components/profile-filters";
 import { ButtonLink, Chip, EmptyState, PageHeader } from "@/components/ui";
+import {
+  isCompany,
+  profileTypeLabelEs,
+  type Company,
+  type ProfileType,
+} from "@/lib/classification";
 import { isDiscCombination, type DiscCombination } from "@/server/pdf/disc";
 import { listProfiles, listTraitOptions } from "@/server/profiles";
 
@@ -28,10 +34,21 @@ function toDiscCombinations(value: string | string[] | undefined): DiscCombinati
     .filter(isDiscCombination);
 }
 
+/**
+ * `?company=CGPAN&company=CGCR`, keeping only the known company codes.
+ *
+ * Same contract as the DISC parser above: the query string is user input, so an
+ * unknown value is dropped rather than sent to the database.
+ */
+function toCompanies(value: string | string[] | undefined): Company[] {
+  return toArray(value).filter(isCompany);
+}
+
 export default async function ProfilesPage({ searchParams }: PageProps<"/profiles">) {
   const params = await searchParams;
   const selected = {
     q: typeof params.q === "string" ? params.q : "",
+    companies: toCompanies(params.company),
     capabilities: toArray(params.capability),
     attitudes: toArray(params.attitude),
     disc: toDiscCombinations(params.disc),
@@ -98,6 +115,10 @@ export default async function ProfilesPage({ searchParams }: PageProps<"/profile
                         ? "Experiencia no registrada"
                         : `${profile.experience_years} años de experiencia`}
                     </p>
+                    <ClassificationSummary
+                      company={profile.company}
+                      profileType={profile.profile_type}
+                    />
                   </div>
 
                   <ProfileActions
@@ -132,5 +153,32 @@ export default async function ProfilesPage({ searchParams }: PageProps<"/profile
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * Empresa and Tipo on the card, shown only once they have been assigned.
+ *
+ * An unassigned profile shows nothing here rather than a placeholder — a default
+ * would read as a real assignment.
+ */
+function ClassificationSummary({
+  company,
+  profileType,
+}: {
+  company: Company | null;
+  profileType: ProfileType | null;
+}) {
+  if (!company && !profileType) return null;
+
+  return (
+    <p className="mt-1 text-sm text-slate-500">
+      {[
+        company ? `Empresa: ${company}` : null,
+        profileType ? `Tipo: ${profileTypeLabelEs(profileType)}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")}
+    </p>
   );
 }

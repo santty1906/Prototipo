@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { deleteProfile, updateProfile } from "@/server/profiles";
+import { isCompany, isProfileType } from "@/lib/classification";
+import { deleteProfile, updateProfile, updateProfileClassification } from "@/server/profiles";
 
 /**
  * Server actions for managing one candidate.
@@ -32,6 +33,27 @@ const updateSchema = z.object({
       (value) => value === "" || (/^\d{1,2}$/.test(value) && Number(value) <= 70),
       "Los años de experiencia deben ser un número entre 0 y 70.",
     ),
+});
+
+/**
+ * Tipo / Empresa, validated against the allow-lists in `@/lib/classification`.
+ *
+ * The empty string is accepted and means "sin asignar" — that is how the
+ * placeholder option clears a value again — but anything else outside the lists
+ * is rejected before the database is touched. Nothing arriving from the client
+ * is trusted: this action is reachable by direct POST, and the codes are written
+ * verbatim into a CHECK-constrained column.
+ */
+const classificationSchema = z.object({
+  id: idSchema,
+  profile_type: z
+    .string()
+    .trim()
+    .refine((value) => value === "" || isProfileType(value), "El tipo seleccionado no es válido."),
+  company: z
+    .string()
+    .trim()
+    .refine((value) => value === "" || isCompany(value), "La empresa seleccionada no es válida."),
 });
 
 // Every runtime export of a "use server" module becomes a callable server
@@ -78,6 +100,50 @@ export async function updateProfileAction(
   revalidatePath("/profiles");
 
   return { status: "success", message: "Cambios guardados correctamente." };
+}
+
+/**
+ * Saves the HR/business classification of one candidate.
+ *
+ * Independent of DISC, of the assessment and of whether any PDF was ever
+ * uploaded — a profile created by hand can be classified straight away. Only
+ * `profile_type` and `company` are written; every other column is left alone.
+ */
+export async function updateProfileClassificationAction(
+  _previous: ProfileFormState,
+  formData: FormData,
+): Promise<ProfileFormState> {
+  const parsed = classificationSchema.safeParse(Object.fromEntries(formData));
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: parsed.error.issues.map((issue) => issue.message).join(" "),
+    };
+  }
+
+  const { id, profile_type, company } = parsed.data;
+
+  try {
+    // The guards narrow the type as well as re-checking it, so no cast is needed
+    // and an unassigned field is stored as NULL rather than an empty string.
+    await updateProfileClassification(id, {
+      profile_type: isProfileType(profile_type) ? profile_type : null,
+      company: isCompany(company) ? company : null,
+    });
+  } catch (cause) {
+    return {
+      status: "error",
+      message: cause instanceof Error ? cause.message : "No se pudo guardar la clasificación.",
+    };
+  }
+
+  // The detail page shows the saved values and the list page both shows them on
+  // the card and filters by Empresa, so both have to be refreshed.
+  revalidatePath(`/profiles/${id}`);
+  revalidatePath("/profiles");
+
+  return { status: "success", message: "Clasificación guardada correctamente." };
 }
 
 export async function deleteProfileAction(

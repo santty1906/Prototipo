@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { Company, ProfileType } from "@/lib/classification";
 import { UPLOAD } from "@/lib/env";
 import { getAdminSupabase } from "@/lib/supabase/admin";
 import type {
@@ -32,6 +33,14 @@ export type ProfileFilters = {
    * of them — and AND against the other filters, like every filter here.
    */
   disc?: DiscCombination[];
+  /**
+   * Companies to keep, e.g. ["CGPAN", "CGCR"].
+   *
+   * OR within the list, AND against the other filters. Read straight off the
+   * stored `profiles.company` — never derived from DISC, the PDF, the position
+   * or anything else — so a profile with no company assigned matches nothing.
+   */
+  companies?: Company[];
 };
 
 const PAGE_SIZE = 50;
@@ -174,6 +183,10 @@ export async function listProfiles(filters: ProfileFilters = {}): Promise<Profil
   // trigram index — a plain `like` suffices since both sides are lower-cased.
   if (search) query = query.like("full_name_normalized", `%${search}%`);
   if (allowedIds !== null) query = query.in("id", allowedIds);
+  // A stored column, so this one is a plain predicate rather than an id set:
+  // IN is the OR, and sitting alongside the other constraints is the AND.
+  const companies = filters.companies ?? [];
+  if (companies.length > 0) query = query.in("company", companies);
 
   const { data, error } = await query;
   if (error) throw new Error(`No se pudieron cargar los perfiles: ${error.message}`);
@@ -394,6 +407,39 @@ export async function updateProfile(id: string, input: UpdateProfileInput) {
     .maybeSingle();
 
   if (error) throw new Error(`No se pudo actualizar el perfil: ${error.message}`);
+  if (!data) throw new Error("Candidato no encontrado.");
+
+  return data.id;
+}
+
+export type ProfileClassificationInput = {
+  profile_type: ProfileType | null;
+  company: Company | null;
+};
+
+/**
+ * Sets the Tipo / Empresa classification of one profile.
+ *
+ * Writes those two columns and nothing else, so a re-classification cannot
+ * disturb the name, the contact details, the summary or anything the PDF
+ * pipeline populated. Null is a real value here: it clears the assignment back
+ * to "sin asignar" rather than being skipped.
+ *
+ * An UPDATE on an existing id, so it can never create a second profile, and it
+ * is independent of whether the profile has an assessment or a document.
+ */
+export async function updateProfileClassification(
+  id: string,
+  input: ProfileClassificationInput,
+) {
+  const { data, error } = await getAdminSupabase()
+    .from("profiles")
+    .update({ profile_type: input.profile_type, company: input.company })
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
+
+  if (error) throw new Error(`No se pudo guardar la clasificación: ${error.message}`);
   if (!data) throw new Error("Candidato no encontrado.");
 
   return data.id;
